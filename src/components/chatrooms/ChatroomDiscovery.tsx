@@ -22,6 +22,8 @@ import {
   Sparkles,
   MessageSquare
 } from "lucide-react";
+import { LoginDialog } from "../auth/LoginDialog";
+import { ConfettiOnMount } from "../layout/ConfettiOnMount";
 
 type StatusMap = Record<ChatroomType, EligibilityStatus>;
 
@@ -75,6 +77,7 @@ export function ChatroomDiscovery() {
     }, {} as StatusMap)
   );
   const [loading, setLoading] = useState(true);
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,6 +112,12 @@ export function ChatroomDiscovery() {
   }, [profile, supabase, authLoading]);
 
   const handleJoin = async (roomId: ChatroomType) => {
+    if (!profile) {
+      // Show login dialog if user is not authenticated
+      setShowLoginDialog(true);
+      return;
+    }
+
     try {
       const res = await fetch("/api/chatrooms/join", {
         method: "POST",
@@ -131,6 +140,11 @@ export function ChatroomDiscovery() {
   };
 
   const handlePreview = (room: ChatroomDefinition, status: EligibilityStatus) => {
+    if (!profile) {
+      setShowLoginDialog(true);
+      return;
+    }
+
     if (status.state === "eligible") {
       handleJoin(room.id);
     } else {
@@ -162,37 +176,68 @@ export function ChatroomDiscovery() {
   }
 
   return (
+    <>
     <main className="mx-auto min-h-screen max-w-6xl px-2 sm:px-6 py-12">
       {/* Hero Section */}
       <div className="mb-12 text-center">
+        <ConfettiOnMount/>
+        {!profile && (
+            <div className="mb-6">
+              <Button 
+                onClick={() => setShowLoginDialog(true)}
+                className="bg-gradient-to-r from-primary to-blue-600 hover:from-primary/90 hover:to-blue-600/90"
+                size="lg"
+              >
+                Sign In to Join Chatrooms
+              </Button>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Sign in once, access all WSF platforms
+              </p>
+            </div>
+          )}
         <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-2 text-sm font-medium text-primary mb-4">
           <Sparkles className="h-4 w-4" />
-          Welcome to WSF Chatrooms
+        {profile ? `Welcome, ${profile.full_name || profile.email}!` : 'Welcome to WSF Chatrooms'}
         </div>
-        <h1 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl">
+        <h1 className="mb-4 text-2xl sm:text-4xl font-bold tracking-tight sm:text-5xl">
           Connect with the <span className="text-primary">Samma Community</span>
         </h1>
-        <p className="mx-auto max-w-2xl text-lg text-muted-foreground">
-          Join conversations with students, club owners, and leaders from around the world. 
-          Each space has its own purpose and access rules.
-        </p>
+        <p className="mx-auto max-w-2xl text-md sm:text-lg text-muted-foreground">
+            {profile 
+              ? "Browse and join chatrooms based on your membership level"
+              : "Sign in to discover chatrooms you can join based on your WSF membership"}
+          </p>
       </div>
 
-      {/* Stats Banner */}
-      <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-lg border bg-card p-6 text-center">
-          <div className="text-2xl font-bold">6</div>
-          <div className="text-sm text-muted-foreground">Active Chatrooms</div>
-        </div>
-        <div className="rounded-lg border bg-card p-6 text-center">
-          <div className="text-2xl font-bold">Global</div>
-          <div className="text-sm text-muted-foreground">Community Reach</div>
-        </div>
-        <div className="rounded-lg border bg-card p-6 text-center">
-          <div className="text-2xl font-bold">Auto</div>
-          <div className="text-sm text-muted-foreground">Translation Enabled</div>
-        </div>
-      </div>
+      {/* Compact Stats Banner */}
+<div className="mb-10">
+  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">6</div>
+      <div className="text-xs text-muted-foreground">Chatrooms</div>
+    </div>
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">Global</div>
+      <div className="text-xs text-muted-foreground">Reach</div>
+    </div>
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">Auto</div>
+      <div className="text-xs text-muted-foreground">Translation</div>
+    </div>
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">24/7</div>
+      <div className="text-xs text-muted-foreground">Active</div>
+    </div>
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">Secure</div>
+      <div className="text-xs text-muted-foreground">Chat</div>
+    </div>
+    <div className="rounded-lg border bg-card p-4 text-center">
+      <div className="text-lg sm:text-xl font-bold">SSO</div>
+      <div className="text-xs text-muted-foreground">Access</div>
+    </div>
+  </div>
+</div>
 
       {/* Chatroom Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -288,7 +333,7 @@ export function ChatroomDiscovery() {
                       isEligible && "bg-primary hover:bg-primary/90"
                     )}
                   >
-                    {isEligible ? "Enter Chat" : "View Details"}
+                    {!profile ? "Sign In to View" : isEligible ? "Enter Chat" : "View Details"}
                   </Button>
                 </div>
               </CardFooter>
@@ -298,19 +343,25 @@ export function ChatroomDiscovery() {
       </div>
 
       {/* Help Section */}
-      <div className="mt-16 rounded-lg border bg-muted/50 p-6">
+      <div className="mt-16 rounded-lg border bg-muted/50 p-2 sm:p-6">
         <div className="flex items-start gap-4">
-          <div className="rounded-full bg-primary/10 p-3">
+          <div className="rounded-full bg-primary/10 p-2 sm:p-3">
             <AlertCircle className="h-6 w-6 text-primary" />
           </div>
           <div>
             <h3 className="mb-2 text-lg font-semibold">Need help joining a chatroom?</h3>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               Some chatrooms require specific membership levels. If you can't join a chatroom you think you should have access to, please contact support or complete your profile information.
             </p>
           </div>
         </div>
       </div>
     </main>
+     <LoginDialog 
+        open={showLoginDialog}
+        onOpenChange={setShowLoginDialog}
+        message={profile ? undefined : "Sign in with your World Samma account to access chatrooms"}
+      />
+      </>
   );
 }
