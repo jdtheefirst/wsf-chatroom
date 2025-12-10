@@ -1,6 +1,6 @@
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ChatroomMessages } from "@/components/chatrooms/ChatroomMessages";
+import { ChatroomMessagesEnhanced } from "@/components/chatrooms/ChatroomMessages";
 import { chatrooms } from "@/lib/chatrooms/config";
 
 type MessageRow = {
@@ -31,8 +31,9 @@ type ChatroomRecord = {
 export default async function ChatroomPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
   const supabase = await createClient();
 
   const [{ data: userData }, { data: chatroom, error: chatroomError }] =
@@ -41,7 +42,7 @@ export default async function ChatroomPage({
       supabase
         .from("chatrooms")
         .select("*")
-        .eq("id", params.id)
+        .eq("id", id)
         .maybeSingle(),
     ]);
 
@@ -91,7 +92,7 @@ export default async function ChatroomPage({
     } as any);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-2 sm:px-6 py-10">
       <header className="space-y-2">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">
           {roomMeta.visibility === "public" ? "Public" : "Restricted"}
@@ -103,11 +104,12 @@ export default async function ChatroomPage({
       </header>
 
       <section className="rounded-lg border bg-card p-4 shadow-sm">
-        <ChatroomMessages
-          chatroomId={chatroom.id}
-          allowFiles={chatroom.allow_files}
-          initialMessages={(messages as unknown as MessageRow[]) ?? []}
-        />
+        <ChatroomMessagesEnhanced
+        chatroomId={chatroom.id}
+        allowFiles={chatroom.allow_files}
+        shareable={chatroom.shareable}
+        initialMessages={(messages as unknown as MessageRow[]) ?? []}
+      />
       </section>
     </main>
   );

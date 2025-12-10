@@ -48,8 +48,9 @@ export async function POST(request: Request) {
       targetCountry
     );
     if (eligibility.state !== "eligible") {
+      const reason = eligibility.state === "ineligible" ? eligibility.reason : "Not eligible";
       return NextResponse.json(
-        { error: eligibility.reason ?? "Not eligible" },
+        { error: reason },
         { status: 403 }
       );
     }

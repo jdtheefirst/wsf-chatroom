@@ -51,8 +51,8 @@ const getEligibilityMessage = (status: EligibilityStatus): { message: string; ic
   // Friendly error messages
   const friendlyMessages: Record<string, string> = {
     "Admission number required.": "Enroll as a student first",
-    "Club owner/manager membership required.": "Become a club owner or manager",
-    "Provincial association leadership required.": "Join your provincial association leadership",
+    "Club owner/manager membership required.": "Become a club owner",
+    "Provincial association leadership required.": "Join your provincial association",
     "National association membership required.": "Join your national association",
     "WSF leadership role required.": "Leadership access only",
     "Sign in to see eligibility.": "Sign in to check access",
@@ -317,7 +317,7 @@ export function ChatroomDiscovery() {
               
               <CardFooter className="pt-4 border-t">
                 <div className="flex w-full items-center justify-between">
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-1 sm:gap-2 text-sm">
                     {eligibility.icon}
                     <span className={cn(
                       isEligible ? "text-green-600" : "text-muted-foreground"

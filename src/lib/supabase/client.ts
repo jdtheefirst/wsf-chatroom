@@ -22,6 +22,11 @@ export function getSupabaseClient() {
           secure: isProduction,
           maxAge: 60 * 60 * 24 * 7, // 7 days
         },
+         realtime: {
+         params: {
+         eventsPerSecond: 10,
+        },
+      },
       }
     );
   }

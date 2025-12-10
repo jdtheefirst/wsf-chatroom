@@ -20,8 +20,14 @@ create table if not exists public.chatrooms (
   created_by uuid references auth.users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (type, coalesce(country_code, 'GLOBAL'))
 );
+
+ALTER TABLE chatrooms
+ADD CONSTRAINT chatrooms_type_country_unique
+UNIQUE (type, country_code);
+
+CREATE UNIQUE INDEX idx_unique_type_country_global
+  ON your_table_name (type, coalesce(country_code, 'GLOBAL'));
 
 create table if not exists public.chatroom_members (
   chatroom_id uuid references public.chatrooms(id) on delete cascade,
