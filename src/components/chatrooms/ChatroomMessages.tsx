@@ -2,20 +2,19 @@
 
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
-import { getSupabaseClient } from "@/lib/supabase/client";
 import { useAuth } from "@/lib/context/AuthContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { useToast } from "@/components/ui/use-toast";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, findLanguage, LanguageCode } from "@/lib/chatrooms/languages";
 import { translateText } from "@/lib/chatrooms/translation";
 import { Alert } from "@/components/ui/alert";
-import { toast as sonnerToast } from "sonner";
+import { toast as sonnerToast, toast } from "sonner";
 
 type MessageRow = {
+  user_id: string;
   id: string;
   content: string;
   language: string | null;
@@ -40,8 +39,7 @@ export function ChatroomMessages({
   allowFiles,
   initialMessages,
 }: Props) {
-  const { profile } = useAuth();
-  const supabase = getSupabaseClient();
+  const { profile, supabase } = useAuth();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -51,7 +49,6 @@ export function ChatroomMessages({
   const [targetLang, setTargetLang] = useState<LanguageCode>("en");
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const listRef = useRef<HTMLDivElement | null>(null);
-  const { toast } = useToast();
 
   useEffect(() => {
     const subscription = supabase
@@ -87,7 +84,7 @@ export function ChatroomMessages({
 
   const sendMessage = async () => {
     if (!profile) {
-      sonnerToast.error("Please sign in to send messages.");
+      toast.error("Please sign in to send messages.");
       return;
     }
     if (!input.trim()) return;

@@ -4,9 +4,11 @@ import { ChatroomMessages } from "@/components/chatrooms/ChatroomMessages";
 import { chatrooms } from "@/lib/chatrooms/config";
 
 type MessageRow = {
+  user_id: string;
   id: string;
   content: string;
   language: string | null;
+  translated_content?: Record<string, string> | null;
   file_url: string | null;
   created_at: string;
   user: {
@@ -104,7 +106,7 @@ export default async function ChatroomPage({
         <ChatroomMessages
           chatroomId={chatroom.id}
           allowFiles={chatroom.allow_files}
-          initialMessages={(messages as MessageRow[]) ?? []}
+          initialMessages={(messages as unknown as MessageRow[]) ?? []}
         />
       </section>
     </main>

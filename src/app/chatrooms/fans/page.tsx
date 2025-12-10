@@ -10,7 +10,7 @@ export default async function FansPublicPage() {
 
   if (data?.id) {
     return (
-      <div className="mx-auto max-w-4xl px-6 py-10">
+      <div className="mx-auto max-w-4xl px-2 sm:px-6 py-10">
         <div className="space-y-2">
           <p className="text-sm font-medium text-primary">WSF Fans</p>
           <h1 className="text-3xl font-semibold tracking-tight">Public feed</h1>

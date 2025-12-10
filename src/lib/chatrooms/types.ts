@@ -10,9 +10,11 @@ export type ChatroomDefinition = {
   id: ChatroomType;
   title: string;
   visibility: "public" | "private";
+  subtitle: string;
   access: string;
   notes?: string;
   features: string[];
+  color: string;
 };
 
 export type EligibilityStatus =

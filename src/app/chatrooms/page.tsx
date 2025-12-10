@@ -23,7 +23,7 @@ export default async function ChatroomIndex() {
   const rooms = chatrooms;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-2 sm:px-6 py-10">
       <div className="space-y-2">
         <p className="text-sm font-medium text-primary">Chatrooms</p>
         <h1 className="text-3xl font-semibold tracking-tight">
