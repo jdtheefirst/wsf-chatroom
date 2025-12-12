@@ -40,3 +40,12 @@ export type MessageRow = {
   } | null;
 };
 
+export type ChatroomRecord = {
+  id: string;
+  type: string;
+  title: string;
+  country_code: string | null;
+  visibility: string;
+  shareable: boolean;
+  allow_files: boolean;
+};

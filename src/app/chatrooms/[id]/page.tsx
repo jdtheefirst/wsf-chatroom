@@ -91,7 +91,7 @@ export default async function ChatroomPage({
 
       <section className="rounded-lg border bg-card p-2 sm:p-4 shadow-sm">
         <ChatroomMessagesEnhanced
-          chatroomId={chatroom.id}
+          chatroom={chatroom}
           allowFiles={chatroom.allow_files}
           shareable={chatroom.shareable}
           initialMessages={(messages as unknown as MessageRow[]) ?? []}

@@ -51,6 +51,7 @@ import { Separator } from "@/components/ui/separator";
 import {
   getBeltColor,
   getBeltInfo,
+  getChatroomTitle,
   getCurrentProgram,
   getNextBelt,
   getProgressPercentage,
@@ -58,17 +59,17 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 import { PresenceManager, PresenceUser } from "@/lib/chatrooms/presence";
 import { EmojiPickerComponent } from "./EmojiPicker";
-import { MessageRow } from "@/lib/chatrooms/types";
+import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
 
 type Props = {
-  chatroomId: string;
+  chatroom: ChatroomRecord;
   allowFiles: boolean;
   shareable: boolean;
   initialMessages: MessageRow[];
 };
 
 export function ChatroomMessagesEnhanced({
-  chatroomId,
+  chatroom,
   allowFiles,
   shareable,
   initialMessages,
@@ -113,14 +114,14 @@ export function ChatroomMessagesEnhanced({
 
     // Create the channel with proper configuration
     const channel = supabase
-      .channel(`realtime:chatroom:${chatroomId}`)
+      .channel(`realtime:chatroom:${chatroom.id}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `chatroom_id=eq.${chatroomId}`,
+          filter: `chatroom_id=eq.${chatroom.id}`,
         },
         async (payload) => {
           console.log("New message received:", payload);
@@ -159,7 +160,7 @@ export function ChatroomMessagesEnhanced({
           event: "UPDATE",
           schema: "public",
           table: "messages",
-          filter: `chatroom_id=eq.${chatroomId}`,
+          filter: `chatroom_id=eq.${chatroom.id}`,
         },
         (payload) => {
           console.log("Message updated:", payload);
@@ -176,7 +177,7 @@ export function ChatroomMessagesEnhanced({
           event: "DELETE",
           schema: "public",
           table: "messages",
-          filter: `chatroom_id=eq.${chatroomId}`,
+          filter: `chatroom_id=eq.${chatroom.id}`,
         },
         (payload) => {
           setMessages((prev) =>
@@ -189,14 +190,14 @@ export function ChatroomMessagesEnhanced({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [chatroomId, profile?.id]);
+  }, [chatroom.id, profile?.id]);
 
   // Updated presence management in component
   useEffect(() => {
     if (!profile?.id || !supabase) return;
 
     // Create manager instance
-    const manager = new PresenceManager(supabase, chatroomId);
+    const manager = new PresenceManager(supabase, chatroom.id);
     presenceManagerRef.current = manager;
 
     // Set callback
@@ -224,7 +225,7 @@ export function ChatroomMessagesEnhanced({
         presenceManagerRef.current = null;
       }
     };
-  }, [profile?.id, chatroomId]);
+  }, [profile?.id, chatroom.id]);
 
   // Separate useEffect for window visibility
   useEffect(() => {
@@ -296,7 +297,7 @@ export function ChatroomMessagesEnhanced({
           /[^a-zA-Z0-9.-]/g,
           "_"
         )}`;
-        const filePath = `chatrooms/${chatroomId}/${fileName}`;
+        const filePath = `chatrooms/${chatroom.id}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("chat_uploads")
@@ -318,7 +319,7 @@ export function ChatroomMessagesEnhanced({
       // Insert message
       const { error: insertError } = await supabase.from("messages").insert({
         user_id: profile.id,
-        chatroom_id: chatroomId,
+        chatroom_id: chatroom.id,
         content: text || "(File attached)",
         language: profile?.language || "en",
         file_url: fileUrl,
@@ -533,7 +534,7 @@ export function ChatroomMessagesEnhanced({
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-2 sm:gap-3">
               <h2 className="text-lg sm:text-xl font-semibold truncate">
-                WSF Fans Chat
+                {getChatroomTitle(chatroom.type)}
               </h2>
               <Badge
                 variant="secondary"
