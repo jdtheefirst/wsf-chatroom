@@ -1,4 +1,4 @@
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 export async function createClient() {
@@ -13,18 +13,24 @@ export async function createClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(
+          cookiesToSet: {
+            name: string;
+            value: string;
+            options: CookieOptions;
+          }[]
+        ) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, {
                 ...options,
-                domain: isProduction ? ".worldsamma.org" : undefined, // 👈 Shared cookie for all subdomains
+                domain: isProduction ? ".worldsamma.org" : undefined,
                 sameSite: "lax",
                 secure: isProduction,
                 maxAge: 60 * 60 * 24 * 7, // 7 days
               })
             );
-          } catch {
+          } catch (error) {
             // The `setAll` method was called from a Server Component.
             // This can be ignored if you have middleware refreshing
             // user sessions.
