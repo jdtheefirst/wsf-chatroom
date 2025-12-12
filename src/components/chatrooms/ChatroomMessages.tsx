@@ -41,6 +41,7 @@ import {
   Bell,
   Settings,
   User,
+  Crown,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -49,6 +50,7 @@ import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import {
+  beltOptions,
   getBeltColor,
   getBeltInfo,
   getChatroomTitle,
@@ -57,7 +59,7 @@ import {
   getProgressPercentage,
 } from "@/lib/constants";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
-import { PresenceManager, PresenceUser } from "@/lib/chatrooms/presence";
+import { PresenceUser } from "@/lib/chatrooms/presence";
 import { EmojiPickerComponent } from "./EmojiPicker";
 import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
 
@@ -96,8 +98,8 @@ export function ChatroomMessagesEnhanced({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const presenceManagerRef = useRef<PresenceManager | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
+  const chatTitle = getChatroomTitle(chatroom.type);
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -192,58 +194,155 @@ export function ChatroomMessagesEnhanced({
     };
   }, [chatroom.id, profile?.id]);
 
-  // Updated presence management in component
+  // Presence management - WORKING VERSION
   useEffect(() => {
-    if (!profile?.id || !supabase) return;
+    if (!profile?.id || !supabase || !chatroom?.id) return;
 
-    // Create manager instance
-    const manager = new PresenceManager(supabase, chatroom.id);
-    presenceManagerRef.current = manager;
+    let presenceChannel: any = null;
+    let heartbeatInterval: NodeJS.Timeout;
 
-    // Set callback
-    manager.onUsersChange((users) => {
-      const onlineUsers = users.filter((u) => u.status === "online");
-      setOnlineUsers(users);
-      setOnlineCount(onlineUsers.length);
-    });
-
-    // Initialize presence
     const initPresence = async () => {
-      if (!profile.id) return;
       try {
-        await manager.initialize(profile.id);
+        // Get user data once
+        const userData = {
+          full_name: profile.full_name,
+          avatar_url: profile.avatar_url,
+          belt_level: profile.belt_level || 0,
+          country_code: profile.country_code || "unknown",
+        };
+
+        if (!userData) {
+          console.error("Failed to get user data");
+          return;
+        }
+
+        // Create presence channel
+        presenceChannel = supabase.channel(`room:${chatroom.id}`, {
+          config: {
+            presence: {
+              key: profile.id,
+            },
+          },
+        });
+
+        // Store processing function
+        const processAndUpdate = () => {
+          if (!presenceChannel) return;
+
+          const state = presenceChannel.presenceState();
+
+          const users = processPresenceState(state);
+          setOnlineUsers(users);
+          setOnlineCount(users.filter((u) => u.status === "online").length);
+        };
+
+        presenceChannel
+          .on("presence", { event: "sync" }, () => {
+            processAndUpdate();
+          })
+          .on("presence", { event: "join" }, ({ key, newPresences }: any) => {
+            processAndUpdate();
+          })
+          .on("presence", { event: "leave" }, ({ key }: any) => {
+            processAndUpdate();
+          })
+          .subscribe(async (status: string, error?: any) => {
+            if (status === "SUBSCRIBED") {
+              // IMPORTANT: Track with the user data directly in the root object
+              await presenceChannel.track({
+                // Put user data directly in the root
+                full_name: userData.full_name,
+                avatar_url: userData.avatar_url,
+                belt_level: userData.belt_level,
+                country_code: userData.country_code,
+                online_at: new Date().toISOString(),
+              });
+
+              // Start heartbeat
+              heartbeatInterval = setInterval(async () => {
+                if (presenceChannel) {
+                  await presenceChannel.track({
+                    full_name: userData.full_name,
+                    avatar_url: userData.avatar_url,
+                    belt_level: userData.belt_level,
+                    country_code: userData.country_code,
+                    online_at: new Date().toISOString(),
+                  });
+                  processAndUpdate();
+                }
+              }, 15000);
+
+              // Initial update after a short delay
+              setTimeout(() => {
+                processAndUpdate();
+              }, 1000);
+            }
+          });
       } catch (error) {
-        console.error("Failed to initialize presence:", error);
+        console.error("Error initializing presence:", error);
       }
+    };
+
+    const processPresenceState = (state: any): PresenceUser[] => {
+      const now = Date.now();
+      const users: PresenceUser[] = [];
+
+      if (!state || typeof state !== "object") {
+        return users;
+      }
+
+      Object.entries(state).forEach(
+        ([userId, presenceEntries]: [string, any]) => {
+          // Supabase presence is always an array
+          const presenceArray = Array.isArray(presenceEntries)
+            ? presenceEntries
+            : [presenceEntries];
+
+          if (presenceArray.length === 0) {
+            return;
+          }
+
+          // Get the latest presence entry (first one is usually latest)
+          const presence = presenceArray[0];
+
+          if (presence && typeof presence === "object") {
+            // Extract data - it's directly in the presence object
+            const full_name = presence.full_name || "Unknown User";
+            const avatar_url = presence.avatar_url;
+            const belt_level = presence.belt_level || 0;
+            const country_code = presence.country_code || "unknown";
+            const online_at = presence.online_at;
+
+            const lastSeen = online_at ? new Date(online_at).getTime() : now;
+
+            const isAway = now - lastSeen > 45000;
+
+            users.push({
+              id: userId,
+              full_name,
+              avatar_url,
+              belt_level,
+              country_code,
+              last_seen: lastSeen,
+              status: isAway ? "away" : "online",
+            });
+          }
+        }
+      );
+      return users;
     };
 
     initPresence();
 
     return () => {
-      if (presenceManagerRef.current) {
-        presenceManagerRef.current.destroy();
-        presenceManagerRef.current = null;
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
+      if (presenceChannel) {
+        supabase.removeChannel(presenceChannel);
       }
     };
-  }, [profile?.id, chatroom.id]);
-
-  // Separate useEffect for window visibility
-  useEffect(() => {
-    const handleVisibilityChange = async () => {
-      if (presenceManagerRef.current) {
-        if (document.hidden) {
-          await presenceManagerRef.current.setUserStatus("away");
-        } else {
-          await presenceManagerRef.current.setUserStatus("online");
-        }
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
+  }, [profile?.id, chatroom?.id]);
 
   // Handle emoji insertion
   const handleEmojiSelect = (emoji: string) => {
@@ -534,7 +633,7 @@ export function ChatroomMessagesEnhanced({
           <div className="flex flex-col min-w-0">
             <div className="flex items-center gap-2 sm:gap-3">
               <h2 className="text-lg sm:text-xl font-semibold truncate">
-                {getChatroomTitle(chatroom.type)}
+                {chatTitle}
               </h2>
               <Badge
                 variant="secondary"
@@ -732,7 +831,7 @@ export function ChatroomMessagesEnhanced({
                     <MessageSquare className="h-10 w-10 text-primary/60" />
                   </div>
                   <h3 className="text-2xl font-semibold mb-3 text-center">
-                    Welcome to WSF Chat! 🥋
+                    Welcome to {chatTitle} 🥋
                   </h3>
                   <p className="text-muted-foreground text-center max-w-md mb-6">
                     Connect with fellow WSF members worldwide. Share your Samma
@@ -777,6 +876,9 @@ export function ChatroomMessagesEnhanced({
                         message.user?.belt_level || 0
                       );
 
+                      const isMaxLevel =
+                        message.user?.belt_level === beltOptions.length - 1;
+
                       return (
                         <div
                           key={message.id}
@@ -817,6 +919,17 @@ export function ChatroomMessagesEnhanced({
                                         } 138`}
                                         className="transition-all duration-500"
                                       />
+                                      {isMaxLevel && (
+                                        <circle
+                                          cx="24"
+                                          cy="24"
+                                          r="18"
+                                          stroke={beltInfo.color}
+                                          strokeWidth="2"
+                                          fill={beltInfo.color}
+                                          fillOpacity="0.1"
+                                        />
+                                      )}
                                     </svg>
                                   </div>
                                 )}
@@ -940,12 +1053,24 @@ export function ChatroomMessagesEnhanced({
                                   <div className="flex items-center gap-2 w-full max-w-xs">
                                     <div className="flex-1">
                                       <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
-                                        <span className="truncate">
-                                          To {nextBelt.name}
-                                        </span>
-                                        <span>
-                                          {Math.round(progressPercentage)}%
-                                        </span>
+                                        {isMaxLevel ? (
+                                          <span className="truncate font-medium text-green-600">
+                                            🏆 Master Level Achieved!
+                                          </span>
+                                        ) : nextBelt ? (
+                                          <>
+                                            <span className="truncate">
+                                              To {nextBelt.name}
+                                            </span>
+                                            <span>
+                                              {Math.round(progressPercentage)}%
+                                            </span>
+                                          </>
+                                        ) : (
+                                          <span className="truncate">
+                                            Progress
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
                                         <div
@@ -959,15 +1084,26 @@ export function ChatroomMessagesEnhanced({
                                     </div>
 
                                     {/* Next Belt Preview */}
-                                    <div className="flex items-center gap-1">
+                                    {isMaxLevel ? (
                                       <div
-                                        className="w-3 h-3 rounded-full"
-                                        style={{
-                                          backgroundColor: nextBelt.color,
-                                        }}
+                                        className="flex items-center gap-1"
+                                        title="Master Level"
+                                      >
+                                        <Crown className="h-3.5 w-3.5 text-yellow-500" />
+                                      </div>
+                                    ) : nextBelt ? (
+                                      <div
+                                        className="flex items-center gap-1"
                                         title={`Next: ${nextBelt.name}`}
-                                      ></div>
-                                    </div>
+                                      >
+                                        <div
+                                          className="w-3 h-3 rounded-full"
+                                          style={{
+                                            backgroundColor: nextBelt.color,
+                                          }}
+                                        ></div>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 )}
                               </div>

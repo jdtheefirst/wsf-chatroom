@@ -126,12 +126,18 @@ export function getCurrentProgram(beltLevel: number) {
 
 // Helper function to get progress percentage (0-100)
 export const getProgressPercentage = (beltLevel: number) => {
-  const maxLevel = beltOptions.length - 1;
+  const maxLevel = beltOptions.length - 1; // 10
+
+  // If at max level, return 100% (complete)
+  if (beltLevel >= maxLevel) return 100;
+
   return (beltLevel / maxLevel) * 100;
 };
 
 // Helper function to get next belt
 export const getNextBelt = (currentLevel: number) => {
+  // If at max level, return null
+  if (currentLevel >= beltOptions.length - 1) return null;
   return beltOptions.find((belt) => belt.level === currentLevel + 1) || null;
 };
 

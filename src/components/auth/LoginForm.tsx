@@ -1,3 +1,4 @@
+// components/auth/LoginForm.tsx
 "use client";
 
 import { useForm } from "react-hook-form";
@@ -15,16 +16,19 @@ import { useState } from "react";
 
 // ---- SCHEMA ----
 const loginSchema = z.object({
-  email: z.email("Invalid email"),
+  email: z.string().email("Invalid email"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-export default function LoginForm() {
+interface LoginFormProps {
+  onLoginSuccess: () => void;
+}
+
+export default function LoginForm({ onLoginSuccess }: LoginFormProps) {
   const { signIn, signInWithGoogle } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -44,7 +48,6 @@ export default function LoginForm() {
       const { error } = await signIn(data.email, data.password);
       if (error) throw error;
 
-      toast.success("Logged in successfully! 🔓", { id: toastId });
       toast.success(
         <div className="flex items-center gap-2">
           <LockKeyholeOpen className="w-4 h-4" />
@@ -52,6 +55,9 @@ export default function LoginForm() {
         </div>,
         { id: toastId, duration: 8000 }
       );
+
+      // Call the success callback to close the dialog
+      onLoginSuccess();
     } catch (err: any) {
       setError("root", { message: err.message || "Login failed" });
       toast.error(err.message || "Login failed ❌", { id: toastId });
@@ -71,6 +77,7 @@ export default function LoginForm() {
               id="email"
               className="mt-1 text-sm"
               {...register("email")}
+              placeholder="you@example.com"
             />
             {errors.email && (
               <p className="text-sm text-red-500 mt-1">
@@ -136,7 +143,7 @@ export default function LoginForm() {
             type="button"
             variant="outline"
             className="w-full"
-            onClick={() => signInWithGoogle()}
+            onClick={signInWithGoogle}
           >
             <FcGoogle className="mr-2 h-5 w-5" />
             Continue with Google
