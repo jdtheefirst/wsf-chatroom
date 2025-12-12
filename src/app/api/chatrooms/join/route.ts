@@ -35,24 +35,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    const targetCountry =
+    const targetCountry: string | null = 
       chatroomId === "psa" || chatroomId === "nsa"
-        ? country_code ?? profile.country_code ?? null
+        ? (country_code ?? profile.country_code ?? null)
         : null;
 
-    // Eligibility check against live data (with country context)
     const eligibility = await checkEligibility(
       supabase,
       profile,
       chatroomId,
       targetCountry
     );
+    
     if (eligibility.state !== "eligible") {
       const reason = eligibility.state === "ineligible" ? eligibility.reason : "Not eligible";
-      return NextResponse.json(
-        { error: reason },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: reason }, { status: 403 });
     }
 
     if (chatroomId === "psa" || chatroomId === "nsa") {
@@ -69,53 +66,73 @@ export async function POST(request: Request) {
       }
     }
 
-    // Ensure chatroom exists (PSA/NSA are per-country). Fans/Students/ClubOwners/Committee are global singletons.
     const roomConfig = chatrooms.find((c) => c.id === chatroomId);
 
-    const { data: upsertedRoom, error: upsertErr } = await supabaseAdmin
-      .from("chatrooms")
-      .upsert(
-        {
-          type: chatroomId,
-          title: roomConfig?.title ?? chatroomId,
-          country_code:
-            chatroomId === "psa" || chatroomId === "nsa" ? targetCountry : null,
-          visibility: roomConfig?.visibility ?? "private",
-          shareable: chatroomId === "wsf_fans",
-          allow_files: chatroomId === "wsf_club_owners" || chatroomId === "wsf_committee",
-        },
-        { onConflict: "type,country_code" }
-      )
-      .select()
-      .maybeSingle();
+    // Call the database function
+    const { data: chatroomResult, error: chatroomError } = await supabase
+      .rpc('get_or_create_chatroom', {
+        p_type: chatroomId,
+        p_title: roomConfig?.title ?? chatroomId,
+        p_country_code: targetCountry,
+        p_visibility: roomConfig?.visibility ?? "private",
+        p_shareable: chatroomId === "wsf_fans",
+        p_allow_files: 
+          chatroomId === "wsf_club_owners" || chatroomId === "wsf_committee",
+        p_created_by: user.id,
+      });
 
-    if (upsertErr || !upsertedRoom) {
-      console.error("Upsert chatroom error", upsertErr);
+    if (chatroomError) {
+      console.error("Chatroom RPC error:", chatroomError);
       return NextResponse.json(
-        { error: "Could not prepare chatroom" },
+        { error: "Failed to get or create chatroom", details: chatroomError.message },
         { status: 500 }
       );
     }
 
-    // Add membership (idempotent)
-    const { error: memberErr } = await supabaseAdmin
+    if (!chatroomResult) {
+      console.error("Chatroom RPC returned null");
+      return NextResponse.json(
+        { error: "Chatroom not found or could not be created" },
+        { status: 500 }
+      );
+    }
+
+    // ✅ chatroomResult is the UUID string itself
+    const chatroomIdToUse = chatroomResult;
+
+    console.log('RPC successful, chatroom ID:', chatroomIdToUse);
+
+    // Check if user is already a member
+    const { data: existingMember } = await supabaseAdmin
       .from("chatroom_members")
-      .upsert(
-        {
-          chatroom_id: upsertedRoom.id,
+      .select("chatroom_id")
+      .eq("chatroom_id", chatroomIdToUse)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!existingMember) {
+      const { error: memberErr } = await supabaseAdmin
+        .from("chatroom_members")
+        .insert({
+          chatroom_id: chatroomIdToUse,
           user_id: user.id,
           status: "active",
           role: "member",
-        },
-        { onConflict: "chatroom_id,user_id" }
-      );
+        });
 
-    if (memberErr) {
-      console.error("Join membership error", memberErr);
-      return NextResponse.json({ error: "Could not join chatroom" }, { status: 500 });
+      if (memberErr) {
+        console.error("Join membership error", memberErr);
+        return NextResponse.json(
+          { error: "Could not join chatroom" },
+          { status: 500 }
+        );
+      }
     }
 
-    return NextResponse.json({ chatroom_id: upsertedRoom.id });
+    return NextResponse.json({ 
+      chatroom_id: chatroomIdToUse,
+      already_member: !!existingMember 
+    });
   } catch (err: any) {
     console.error("Join route error", err);
     return NextResponse.json(

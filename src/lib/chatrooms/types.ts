@@ -22,3 +22,21 @@ export type EligibilityStatus =
   | { state: "eligible" }
   | { state: "ineligible"; reason: string };
 
+export type MessageRow = {
+  user_id: string;
+  id: string;
+  content: string;
+  language: string | null;
+  translated_content?: Record<string, string> | null;
+  file_url: string | null;
+  created_at: string;
+  user: {
+    id: string;
+    full_name: string | null;
+    email?: string | null;
+    avatar_url: string | null;
+    belt_level?: number;
+    role?: string;
+  } | null;
+};
+

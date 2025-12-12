@@ -26,9 +26,6 @@ ALTER TABLE chatrooms
 ADD CONSTRAINT chatrooms_type_country_unique
 UNIQUE (type, country_code);
 
-CREATE UNIQUE INDEX idx_unique_type_country_global
-  ON your_table_name (type, coalesce(country_code, 'GLOBAL'));
-
 create table if not exists public.chatroom_members (
   chatroom_id uuid references public.chatrooms(id) on delete cascade,
   user_id uuid references public.users_profile(id) on delete cascade,
@@ -41,7 +38,7 @@ create table if not exists public.chatroom_members (
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   chatroom_id uuid references public.chatrooms(id) on delete cascade,
-  user_id uuid references public.users_profile(id) on delete set null,
+  user_id uuid references public.users_profile(id) not null on delete set null,
   content text not null,
   updated_at timestamptz,
   language text default 'en',
@@ -49,6 +46,61 @@ create table if not exists public.messages (
   file_url text,
   created_at timestamptz not null default now()
 );
+
+-- Note: Changed p_country_code parameter from char(2) to text to handle NULL
+CREATE OR REPLACE FUNCTION get_or_create_chatroom(
+  p_type chatroom_type,
+  p_title text,
+  p_country_code text DEFAULT NULL,  -- Changed from char(2) to text
+  p_visibility text DEFAULT 'private',
+  p_shareable boolean DEFAULT false,
+  p_allow_files boolean DEFAULT false,
+  p_created_by uuid DEFAULT NULL
+) RETURNS uuid AS $$
+DECLARE
+  v_chatroom_id uuid;
+BEGIN
+  -- Try to find existing chatroom
+  SELECT id INTO v_chatroom_id
+  FROM chatrooms
+  WHERE type = p_type 
+    AND country_code IS NOT DISTINCT FROM p_country_code;
+  
+  -- If not found, insert
+  IF v_chatroom_id IS NULL THEN
+    INSERT INTO chatrooms (
+      type,
+      title,
+      country_code,
+      visibility,
+      shareable,
+      allow_files,
+      created_by
+    ) VALUES (
+      p_type,
+      p_title,
+      p_country_code,  -- Can be NULL or a 2-char code
+      p_visibility,
+      p_shareable,
+      p_allow_files,
+      p_created_by
+    )
+    ON CONFLICT (type, country_code) 
+    DO UPDATE SET updated_at = NOW()
+    RETURNING id INTO v_chatroom_id;
+  END IF;
+  
+  RETURN v_chatroom_id;
+EXCEPTION
+  WHEN unique_violation THEN
+    -- Race condition - try to fetch again
+    SELECT id INTO v_chatroom_id
+    FROM chatrooms
+    WHERE type = p_type 
+      AND country_code IS NOT DISTINCT FROM p_country_code;
+    RETURN v_chatroom_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 create index if not exists idx_messages_chatroom_id_created_at on public.messages (chatroom_id, created_at desc);
 

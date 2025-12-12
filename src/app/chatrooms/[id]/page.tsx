@@ -2,31 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ChatroomMessagesEnhanced } from "@/components/chatrooms/ChatroomMessages";
 import { chatrooms } from "@/lib/chatrooms/config";
-
-type MessageRow = {
-  user_id: string;
-  id: string;
-  content: string;
-  language: string | null;
-  translated_content?: Record<string, string> | null;
-  file_url: string | null;
-  created_at: string;
-  user: {
-    id: string;
-    full_name: string | null;
-    avatar_url: string | null;
-  } | null;
-};
-
-type ChatroomRecord = {
-  id: string;
-  type: string;
-  title: string;
-  country_code: string | null;
-  visibility: string;
-  shareable: boolean;
-  allow_files: boolean;
-};
+import { MessageRow } from "@/lib/chatrooms/types";
 
 export default async function ChatroomPage({
   params,
@@ -39,11 +15,7 @@ export default async function ChatroomPage({
   const [{ data: userData }, { data: chatroom, error: chatroomError }] =
     await Promise.all([
       supabase.auth.getUser(),
-      supabase
-        .from("chatrooms")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle(),
+      supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
     ]);
 
   if (chatroomError || !chatroom) {
@@ -75,7 +47,21 @@ export default async function ChatroomPage({
   const { data: messages } = await supabase
     .from("messages")
     .select(
-      "id, content, language, file_url, created_at, user:users_profile ( id, full_name, avatar_url )"
+      `
+      id,
+      content,
+      language,
+      file_url,
+      created_at,
+      user_id,
+      user: users_profile!messages_user_id_fkey (
+        id,
+        full_name,
+        avatar_url,
+        belt_level,
+        country_code
+      )
+    `
     )
     .eq("chatroom_id", chatroom.id)
     .order("created_at", { ascending: true })
@@ -103,15 +89,14 @@ export default async function ChatroomPage({
         ) : null}
       </header>
 
-      <section className="rounded-lg border bg-card p-4 shadow-sm">
+      <section className="rounded-lg border bg-card p-2 sm:p-4 shadow-sm">
         <ChatroomMessagesEnhanced
-        chatroomId={chatroom.id}
-        allowFiles={chatroom.allow_files}
-        shareable={chatroom.shareable}
-        initialMessages={(messages as unknown as MessageRow[]) ?? []}
-      />
+          chatroomId={chatroom.id}
+          allowFiles={chatroom.allow_files}
+          shareable={chatroom.shareable}
+          initialMessages={(messages as unknown as MessageRow[]) ?? []}
+        />
       </section>
     </main>
   );
 }
-
