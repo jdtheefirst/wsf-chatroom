@@ -186,7 +186,8 @@ create policy "Messages delete by author" on public.messages
     or auth.role() = 'service_role'
   );
 
--- Recommended storage buckets and policies (outline, create via Supabase storage):
--- Buckets: chat-attachments (private), chat-public (public for shareable fans posts)
--- Enforce size limits at upload time in app layer.
+-- Messages Indexes
+CREATE INDEX IF NOT EXISTS idx_messages_chatroom_created ON messages(chatroom_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_messages_chatroom_user ON messages(chatroom_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
 

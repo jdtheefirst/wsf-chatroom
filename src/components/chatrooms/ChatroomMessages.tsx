@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/lib/context/AuthContext";
-import { cn } from "@/lib/utils";
+import { cn, getInitials } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -42,6 +42,10 @@ import {
   Settings,
   User,
   Crown,
+  Calendar,
+  Trophy,
+  TrendingUp,
+  Award,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -63,6 +67,7 @@ import { PresenceUser } from "@/lib/chatrooms/presence";
 import { EmojiPickerComponent } from "./EmojiPicker";
 import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
 import { useRouter } from "next/navigation";
+import { LeaderboardItem } from "./LeaderboardItem";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -107,10 +112,66 @@ export function ChatroomMessagesEnhanced({
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
+  const [dailyLeaderboard, setDailyLeaderboard] = useState<any[]>([]);
+  const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<any[]>([]);
+  const [allTimeLeaderboard, setAllTimeLeaderboard] = useState<any[]>([]);
+  const [loadingLeaderboards, setLoadingLeaderboards] = useState(true);
+  const [userRank, setUserRank] = useState<{
+    position: number;
+    messageCount: number;
+  } | null>(null);
+
+  const leaderboardRefetchTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch leaderboards
+  const fetchLeaderboards = async () => {
+    if (!chatroom?.id) return;
+
+    try {
+      setLoadingLeaderboards(true);
+
+      const response = await fetch(
+        `/api/chatrooms/leaderboard?chatroomId=${chatroom.id}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setDailyLeaderboard(data.daily || []);
+        setWeeklyLeaderboard(data.weekly || []);
+        setAllTimeLeaderboard(data.allTime || []);
+
+        // Find current user's rank in all-time
+        if (profile?.id && data.allTime) {
+          const userIndex = data.allTime.findIndex(
+            (item: any) => item.user.id === profile.id
+          );
+          if (userIndex !== -1) {
+            setUserRank({
+              position: userIndex + 1,
+              messageCount: data.allTime[userIndex].messageCount,
+            });
+          } else {
+            setUserRank(null);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching leaderboards:", error);
+    } finally {
+      setLoadingLeaderboards(false);
+    }
+  };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+    if (chatroom?.id) {
+      fetchLeaderboards();
+    }
+    return () => {
+      if (leaderboardRefetchTimeout.current) {
+        clearTimeout(leaderboardRefetchTimeout.current);
+      }
+    };
+  }, [messages, chatroom?.id]);
 
   // Realtime subscription for messages
   useEffect(() => {
@@ -158,6 +219,15 @@ export function ChatroomMessagesEnhanced({
           if (messageWithUser.user_id !== profile?.id) {
             toast.info(`New message from ${userProfile?.full_name || "User"}`);
           }
+
+          // Debounce leaderboard updates
+          if (leaderboardRefetchTimeout.current) {
+            clearTimeout(leaderboardRefetchTimeout.current);
+          }
+
+          leaderboardRefetchTimeout.current = setTimeout(() => {
+            fetchLeaderboards();
+          }, 2000); // 2 second debounce
         }
       )
       .on(
@@ -194,6 +264,9 @@ export function ChatroomMessagesEnhanced({
       .subscribe();
 
     return () => {
+      if (leaderboardRefetchTimeout.current) {
+        clearTimeout(leaderboardRefetchTimeout.current);
+      }
       supabase.removeChannel(channel);
     };
   }, [chatroom.id, profile?.id]);
@@ -472,16 +545,6 @@ export function ChatroomMessagesEnhanced({
 
     setFile(selectedFile);
     toast.success(`File selected: ${selectedFile.name}`);
-  };
-
-  const getInitials = (name: string | null) => {
-    if (!name) return "U";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
   };
 
   const copyMessage = async (content: string, messageId: string) => {
@@ -1538,28 +1601,312 @@ export function ChatroomMessagesEnhanced({
             value="info"
             className="min-h-0 overflow-auto p-2 sm:p-6 h-full overflow-y-auto mt-0"
           >
-            <div className="max-w-4xl mx-auto space-y-4">
-              <h3 className="text-lg font-semibold">Chatroom Information</h3>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2 rounded-lg border p-4">
-                  <h4 className="font-medium">Features</h4>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    <li>• Public and shareable messages</li>
-                    <li>• Auto-translation to multiple languages</li>
-                    <li>• File attachments (up to 10MB)</li>
-                    <li>• Real-time messaging</li>
-                    <li>• Message editing and deletion</li>
-                  </ul>
+            <div className="max-w-4xl mx-auto space-y-6">
+              {/* Chatroom Information */}
+              <div>
+                <h3 className="text-lg font-semibold mb-3">
+                  Chatroom Information
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2 rounded-lg border p-4">
+                    <h4 className="font-medium">Features</h4>
+                    <ul className="space-y-1 text-sm text-muted-foreground">
+                      <li>• Public and shareable messages</li>
+                      <li>• Auto-translation to multiple languages</li>
+                      <li>• File attachments (up to 10MB)</li>
+                      <li>• Real-time messaging</li>
+                      <li>• Message editing and deletion</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-2 rounded-lg border p-4">
+                    <h4 className="font-medium">Rules</h4>
+                    <ul className="space-y-1 text-sm text-muted-foreground">
+                      <li>• Be respectful to all members</li>
+                      <li>• No spam or advertising</li>
+                      <li>• Keep conversations Samma-related</li>
+                      <li>• No inappropriate content</li>
+                      <li>• Follow WSF Code of Conduct</li>
+                    </ul>
+                  </div>
                 </div>
-                <div className="space-y-2 rounded-lg border p-4">
-                  <h4 className="font-medium">Rules</h4>
-                  <ul className="space-y-1 text-sm text-muted-foreground">
-                    <li>• Be respectful to all members</li>
-                    <li>• No spam or advertising</li>
-                    <li>• Keep conversations Samma-related</li>
-                    <li>• No inappropriate content</li>
-                    <li>• Follow WSF Code of Conduct</li>
-                  </ul>
+              </div>
+
+              {/* Weekly Rewards Section */}
+              <div className="rounded-xl border bg-gradient-to-br from-primary/5 to-primary/10 p-2 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-sm sm:text-lg font-semibold flex items-center gap-2">
+                      <Trophy className="h-5 w-5 text-yellow-600" />
+                      Weekly Activity Rewards
+                    </h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Top contributors receive special rewards every Sunday!
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="gap-1 text-xs">
+                    <Calendar className="h-3 w-3" />
+                    Resets: Sunday 12:00 AM UTC
+                  </Badge>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Reward Tiers */}
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-sm">Reward Tiers 🏆</h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-yellow-50 to-amber-50 border border-yellow-200">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-full bg-yellow-100 flex items-center justify-center">
+                            <span className="text-yellow-700 font-bold text-sm">
+                              1
+                            </span>
+                          </div>
+                          <div>
+                            <div className="font-medium">Gold Tier</div>
+                            <div className="text-xs text-muted-foreground">
+                              Top 1-3
+                            </div>
+                          </div>
+                        </div>
+                        <Badge className="bg-yellow-100 text-yellow-800 hover:bg-yellow-100">
+                          500 WSF Points
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-slate-50 to-slate-100 border border-slate-200">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-full bg-slate-100 flex items-center justify-center">
+                            <span className="text-slate-700 font-bold text-sm">
+                              2
+                            </span>
+                          </div>
+                          <div>
+                            <div className="font-medium">Silver Tier</div>
+                            <div className="text-xs text-muted-foreground">
+                              Top 4-7
+                            </div>
+                          </div>
+                        </div>
+                        <Badge className="bg-slate-100 text-slate-800 hover:bg-slate-100">
+                          250 WSF Points
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between p-3 rounded-lg bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200">
+                        <div className="flex items-center gap-3">
+                          <div className="h-8 w-8 rounded-full bg-amber-100 flex items-center justify-center">
+                            <span className="text-amber-700 font-bold text-sm">
+                              3
+                            </span>
+                          </div>
+                          <div>
+                            <div className="font-medium">Bronze Tier</div>
+                            <div className="text-xs text-muted-foreground">
+                              Top 8-10
+                            </div>
+                          </div>
+                        </div>
+                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+                          100 WSF Points
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Current Week Stats */}
+                  <div className="space-y-3">
+                    <h4 className="font-medium text-sm">
+                      This Week's Progress
+                    </h4>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between p-3 rounded-lg border">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                            {profile?.avatar_url ? (
+                              <img
+                                src={profile.avatar_url}
+                                className="h-8 w-8 rounded-full"
+                              />
+                            ) : (
+                              <User className="h-5 w-5 text-primary" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-medium">Your Rank</div>
+                            <div className="text-xs text-muted-foreground">
+                              {userRank
+                                ? `#${userRank.position} with ${userRank.messageCount} messages`
+                                : "Not ranked yet"}
+                            </div>
+                          </div>
+                        </div>
+                        {userRank && userRank?.position! <= 10 && (
+                          <Badge variant="secondary" className="gap-1">
+                            <TrendingUp className="h-3 w-3" />
+                            Top 10
+                          </Badge>
+                        )}
+                      </div>
+
+                      <div className="text-xs text-muted-foreground p-3 rounded-lg bg-muted/50">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Info className="h-3 w-3" />
+                          <span className="font-medium">How it works:</span>
+                        </div>
+                        <ul className="space-y-1 pl-5 list-disc">
+                          <li>Every message counts as 1 point</li>
+                          <li>Top 10 each week get rewards</li>
+                          <li>Leaderboards reset every Sunday</li>
+                          <li>Rewards are distributed automatically</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {/* Leaderboards - 3 columns on desktop */}
+              <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
+                {/* 24-Hour Leaderboard */}
+                <div className="rounded-lg border">
+                  <div className="p-4 border-b">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold flex items-center gap-2">
+                        <Zap className="h-4 w-4 text-green-600" />
+                        Last 24 Hours
+                      </h4>
+                      <Badge variant="outline" className="text-xs">
+                        Live
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Today's most active
+                    </p>
+                  </div>
+
+                  <div className="p-2">
+                    {loadingLeaderboards ? (
+                      <div className="p-6 text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">
+                          Loading...
+                        </p>
+                      </div>
+                    ) : dailyLeaderboard.length === 0 ? (
+                      <div className="p-6 text-center">
+                        <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">
+                          No messages today
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {dailyLeaderboard.slice(0, 5).map((item, index) => (
+                          <LeaderboardItem
+                            key={item.user.id}
+                            item={item}
+                            index={index}
+                            currentUserId={profile?.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Weekly Leaderboard */}
+                <div className="rounded-lg border">
+                  <div className="p-4 border-b">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-blue-600" />
+                        This Week
+                      </h4>
+                      <Badge variant="outline" className="text-xs">
+                        For Rewards
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Weekly ranking for rewards
+                    </p>
+                  </div>
+
+                  <div className="p-2">
+                    {loadingLeaderboards ? (
+                      <div className="p-6 text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">
+                          Loading...
+                        </p>
+                      </div>
+                    ) : weeklyLeaderboard.length === 0 ? (
+                      <div className="p-6 text-center">
+                        <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">
+                          No messages this week
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {weeklyLeaderboard.slice(0, 5).map((item, index) => (
+                          <LeaderboardItem
+                            key={item.user.id}
+                            item={item}
+                            index={index}
+                            currentUserId={profile?.id}
+                            showRewardTier={true}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* All-Time Leaderboard */}
+                <div className="rounded-lg border">
+                  <div className="p-4 border-b">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold flex items-center gap-2">
+                        <Award className="h-4 w-4 text-purple-600" />
+                        All-Time Top 5
+                      </h4>
+                      <Badge variant="outline" className="text-xs">
+                        Legends
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Most active members overall
+                    </p>
+                  </div>
+
+                  <div className="p-2">
+                    {loadingLeaderboards ? (
+                      <div className="p-6 text-center">
+                        <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+                        <p className="text-sm text-muted-foreground">
+                          Loading...
+                        </p>
+                      </div>
+                    ) : allTimeLeaderboard.length === 0 ? (
+                      <div className="p-6 text-center">
+                        <MessageSquare className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">
+                          No messages yet
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {allTimeLeaderboard.slice(0, 5).map((item, index) => (
+                          <LeaderboardItem
+                            key={item.user.id}
+                            item={item}
+                            index={index}
+                            currentUserId={profile?.id}
+                            isAllTime={true}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

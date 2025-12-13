@@ -1,8 +1,101 @@
+// app/chatrooms/[id]/page.tsx
+import { Metadata } from "next";
 import { redirect, notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ChatroomMessagesEnhanced } from "@/components/chatrooms/ChatroomMessages";
 import { chatrooms } from "@/lib/chatrooms/config";
-import { MessageRow } from "@/lib/chatrooms/types";
+import { MessageRow, ChatroomRecord } from "@/lib/chatrooms/types";
+import { generateChatroomMetadata } from "@/lib/chatrooms/metadata";
+import { ChatroomShareButton } from "@/components/chatrooms/ChatroomShareButton";
+import { cache } from "react";
+
+// Add revalidation (1 hour)
+export const revalidate = 3600; // 1 hour in seconds
+
+// Cached data fetching - will be deduplicated across generateMetadata and page
+const getChatroomData = cache(async (id: string) => {
+  const supabase = await createClient();
+
+  // Fetch all data in parallel
+  const [
+    { data: userData },
+    { data: chatroom, error: chatroomError },
+    { data: messages },
+  ] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
+    supabase
+      .from("messages")
+      .select(
+        `
+        id,
+        content,
+        language,
+        file_url,
+        created_at,
+        user_id,
+        user: users_profile!messages_user_id_fkey (
+          id,
+          full_name,
+          admission_no,
+          avatar_url,
+          belt_level,
+          country_code
+        )
+      `
+      )
+      .eq("chatroom_id", id)
+      .order("created_at", { ascending: true })
+      .limit(50),
+  ]);
+
+  return {
+    userData,
+    chatroom,
+    chatroomError,
+    messages: messages as unknown as MessageRow[],
+    supabase,
+  };
+});
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+
+  // This will be cached and reused by the page component
+  const { chatroom, chatroomError } = await getChatroomData(id);
+
+  if (!chatroom || chatroomError) {
+    return {
+      title: "Chatroom Not Found",
+      description: "The requested chatroom could not be found",
+    };
+  }
+
+  const roomMeta = chatrooms.find((c) => c.id === chatroom.type) ?? {
+    id: chatroom.type,
+    title: chatroom.title,
+    visibility: chatroom.visibility,
+  };
+
+  // Include country in description for PSA and NSA
+  const getCountryDescription = () => {
+    if (chatroom.country_code && ["psa", "nsa"].includes(chatroom.type)) {
+      return `${
+        chatroom.title
+      } - ${chatroom.country_code.toUpperCase()} Chatroom`;
+    }
+    return chatroom.title;
+  };
+
+  return generateChatroomMetadata(chatroom as ChatroomRecord, {
+    ...roomMeta,
+    title: getCountryDescription(),
+  });
+}
 
 export default async function ChatroomPage({
   params,
@@ -10,13 +103,10 @@ export default async function ChatroomPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const supabase = await createClient();
 
-  const [{ data: userData }, { data: chatroom, error: chatroomError }] =
-    await Promise.all([
-      supabase.auth.getUser(),
-      supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
-    ]);
+  // This will reuse the cached data from generateMetadata
+  const { userData, chatroom, chatroomError, messages, supabase } =
+    await getChatroomData(id);
 
   if (chatroomError || !chatroom) {
     return notFound();
@@ -44,30 +134,6 @@ export default async function ChatroomPage({
     }
   }
 
-  const { data: messages } = await supabase
-    .from("messages")
-    .select(
-      `
-      id,
-      content,
-      language,
-      file_url,
-      created_at,
-      user_id,
-      user: users_profile!messages_user_id_fkey (
-        id,
-        full_name,
-        admission_no,
-        avatar_url,
-        belt_level,
-        country_code
-      )
-    `
-    )
-    .eq("chatroom_id", chatroom.id)
-    .order("created_at", { ascending: true })
-    .limit(50);
-
   const roomMeta =
     chatrooms.find((c) => c.id === chatroom.type) ??
     ({
@@ -81,13 +147,33 @@ export default async function ChatroomPage({
   return (
     <main className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-2 sm:px-6 py-10">
       <header className="space-y-2">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          {roomMeta.visibility === "public" ? "Public" : "Restricted"}
-        </p>
-        <h1 className="text-2xl font-semibold">{chatroom.title}</h1>
-        {roomMeta.access ? (
-          <p className="text-sm text-muted-foreground">{roomMeta.access}</p>
-        ) : null}
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              {roomMeta.visibility === "public" ? "Public" : "Restricted"}
+            </p>
+            <h1 className="text-2xl font-semibold">
+              {chatroom.title}
+              {chatroom.country_code &&
+                ["psa", "nsa"].includes(chatroom.type) && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    ({chatroom.country_code.toUpperCase()})
+                  </span>
+                )}
+            </h1>
+            {roomMeta.access ? (
+              <p className="text-sm text-muted-foreground">{roomMeta.access}</p>
+            ) : null}
+          </div>
+
+          {/* Add share button */}
+          {chatroom.shareable && (
+            <ChatroomShareButton
+              chatroom={chatroom as ChatroomRecord}
+              roomMeta={roomMeta}
+            />
+          )}
+        </div>
       </header>
 
       <section className="rounded-lg border bg-card p-2 sm:p-4 shadow-sm">
@@ -95,7 +181,7 @@ export default async function ChatroomPage({
           chatroom={chatroom}
           allowFiles={chatroom.allow_files}
           shareable={chatroom.shareable}
-          initialMessages={(messages as unknown as MessageRow[]) ?? []}
+          initialMessages={messages ?? []}
         />
       </section>
     </main>
