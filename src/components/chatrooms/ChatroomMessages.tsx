@@ -62,6 +62,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 import { PresenceUser } from "@/lib/chatrooms/presence";
 import { EmojiPickerComponent } from "./EmojiPicker";
 import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
+import { useRouter } from "next/navigation";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -100,6 +101,7 @@ export function ChatroomMessagesEnhanced({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
   const chatTitle = getChatroomTitle(chatroom.type);
+  const router = useRouter();
 
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -133,7 +135,9 @@ export function ChatroomMessagesEnhanced({
           // Fetch user profile
           const { data: userProfile } = await supabase
             .from("users_profile")
-            .select("id, full_name, avatar_url, belt_level, country_code")
+            .select(
+              "id, full_name, admission_no, avatar_url, belt_level, country_code"
+            )
             .eq("id", newMessage.user_id)
             .single();
 
@@ -206,6 +210,7 @@ export function ChatroomMessagesEnhanced({
         // Get user data once
         const userData = {
           full_name: profile.full_name,
+          admission_no: profile.admission_no,
           avatar_url: profile.avatar_url,
           belt_level: profile.belt_level || 0,
           country_code: profile.country_code || "unknown",
@@ -252,6 +257,7 @@ export function ChatroomMessagesEnhanced({
               await presenceChannel.track({
                 // Put user data directly in the root
                 full_name: userData.full_name,
+                admission_no: userData.admission_no,
                 avatar_url: userData.avatar_url,
                 belt_level: userData.belt_level,
                 country_code: userData.country_code,
@@ -263,6 +269,7 @@ export function ChatroomMessagesEnhanced({
                 if (presenceChannel) {
                   await presenceChannel.track({
                     full_name: userData.full_name,
+                    admission_no: userData.admission_no,
                     avatar_url: userData.avatar_url,
                     belt_level: userData.belt_level,
                     country_code: userData.country_code,
@@ -308,6 +315,7 @@ export function ChatroomMessagesEnhanced({
           if (presence && typeof presence === "object") {
             // Extract data - it's directly in the presence object
             const full_name = presence.full_name || "Unknown User";
+            const admission_no = presence.admission_no;
             const avatar_url = presence.avatar_url;
             const belt_level = presence.belt_level || 0;
             const country_code = presence.country_code || "unknown";
@@ -320,6 +328,7 @@ export function ChatroomMessagesEnhanced({
             users.push({
               id: userId,
               full_name,
+              admission_no,
               avatar_url,
               belt_level,
               country_code,
@@ -826,7 +835,7 @@ export function ChatroomMessagesEnhanced({
             {/* Scrollable Messages Area */}
             <div className="flex-1 min-h-0 overflow-y-auto">
               {messages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center p-8">
+                <div className="h-full flex flex-col items-center justify-center p-2 sm:p-8">
                   <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center mb-6">
                     <MessageSquare className="h-10 w-10 text-primary/60" />
                   </div>
@@ -856,13 +865,14 @@ export function ChatroomMessagesEnhanced({
                   </div>
                 </div>
               ) : (
-                <div className="p-4 sm:p-6">
+                <div className="p-2 sm:p-6">
                   <div className="max-w-4xl mx-auto space-y-4">
                     {messages.map((message) => {
                       const beltInfo =
                         message.user?.belt_level !== undefined
                           ? getBeltInfo(message.user.belt_level)
                           : null;
+
                       const nextBelt =
                         message.user?.belt_level !== undefined
                           ? getNextBelt(message.user.belt_level)
@@ -878,6 +888,8 @@ export function ChatroomMessagesEnhanced({
 
                       const isMaxLevel =
                         message.user?.belt_level === beltOptions.length - 1;
+
+                      const isCurrentUser = message.user_id === profile?.id;
 
                       return (
                         <div
@@ -935,7 +947,7 @@ export function ChatroomMessagesEnhanced({
                                 )}
 
                                 {/* Avatar */}
-                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl border-2 border-background shadow-sm relative z-10">
+                                <Avatar className="h-10 w-10 sm:h-12 sm:w-12 rounded-full border-2 border-background shadow-sm relative z-10">
                                   <AvatarImage
                                     src={message.user?.avatar_url || ""}
                                     className="rounded-full"
@@ -974,8 +986,10 @@ export function ChatroomMessagesEnhanced({
                               <div className="flex flex-col w-full">
                                 <div className="flex items-center justify-between w-full mb-1">
                                   <span className="font-semibold text-sm truncate">
-                                    {message.user?.full_name ||
-                                      "Anonymous User"}
+                                    {isCurrentUser
+                                      ? "You"
+                                      : message.user?.full_name ||
+                                        "Anonymous User"}
                                   </span>
                                   <span className="text-xs text-muted-foreground whitespace-nowrap">
                                     {formatDistanceToNow(
@@ -1019,8 +1033,10 @@ export function ChatroomMessagesEnhanced({
                                 {/* User Info with Belt Progress */}
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-semibold text-sm">
-                                    {message.user?.full_name ||
-                                      "Anonymous User"}
+                                    {isCurrentUser
+                                      ? "You"
+                                      : message.user?.full_name ||
+                                        "Anonymous User"}
                                   </span>
 
                                   {beltInfo && (
@@ -1049,13 +1065,13 @@ export function ChatroomMessagesEnhanced({
                                 </div>
 
                                 {/* Progress Bar & Next Belt Info */}
-                                {beltInfo && nextBelt && (
+                                {beltInfo && (
                                   <div className="flex items-center gap-2 w-full max-w-xs">
                                     <div className="flex-1">
                                       <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
                                         {isMaxLevel ? (
                                           <span className="truncate font-medium text-green-600">
-                                            🏆 Master Level Achieved!
+                                            🏆 GM Level Achieved!
                                           </span>
                                         ) : nextBelt ? (
                                           <>
@@ -1083,11 +1099,11 @@ export function ChatroomMessagesEnhanced({
                                       </div>
                                     </div>
 
-                                    {/* Next Belt Preview */}
+                                    {/* Next Belt Preview or Max Level Badge */}
                                     {isMaxLevel ? (
                                       <div
                                         className="flex items-center gap-1"
-                                        title="Master Level"
+                                        title="GM Level"
                                       >
                                         <Crown className="h-3.5 w-3.5 text-yellow-500" />
                                       </div>
@@ -1135,7 +1151,9 @@ export function ChatroomMessagesEnhanced({
                                     >
                                       <DropdownMenuItem
                                         onClick={() => {
-                                          /* View profile */
+                                          router.push(
+                                            `https://www.worldsamma.org/students/${message.user?.admission_no}`
+                                          );
                                         }}
                                         className="cursor-pointer rounded-lg"
                                       >
@@ -1280,28 +1298,63 @@ export function ChatroomMessagesEnhanced({
                             {/* Mobile Message Actions - Full width row */}
                             <div className="flex items-center justify-between w-full mt-2 sm:hidden">
                               {/* Mobile Progress Bar */}
-                              {beltInfo && nextBelt && (
-                                <div className="flex-1 mr-2">
-                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
-                                    <span className="truncate">
-                                      To {nextBelt.name}
-                                    </span>
-                                    <span>
-                                      {Math.round(progressPercentage)}%
-                                    </span>
+                              {beltInfo && (
+                                <div className="flex items-center gap-2 w-full max-w-xs">
+                                  <div className="flex-1">
+                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
+                                      {isMaxLevel ? (
+                                        <span className="truncate font-medium text-green-600">
+                                          🏆 GM Level Achieved!
+                                        </span>
+                                      ) : nextBelt ? (
+                                        <>
+                                          <span className="truncate">
+                                            To {nextBelt.name}
+                                          </span>
+                                          <span>
+                                            {Math.round(progressPercentage)}%
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span className="truncate">
+                                          Progress
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full transition-all duration-500"
+                                        style={{
+                                          width: `${progressPercentage}%`,
+                                          backgroundColor: beltInfo.color,
+                                        }}
+                                      ></div>
+                                    </div>
                                   </div>
-                                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+
+                                  {/* Next Belt Preview or Max Level Badge */}
+                                  {isMaxLevel ? (
                                     <div
-                                      className="h-full rounded-full transition-all duration-500"
-                                      style={{
-                                        width: `${progressPercentage}%`,
-                                        backgroundColor: beltInfo.color,
-                                      }}
-                                    ></div>
-                                  </div>
+                                      className="flex items-center gap-1"
+                                      title="Master Level"
+                                    >
+                                      <Crown className="h-3.5 w-3.5 text-yellow-500" />
+                                    </div>
+                                  ) : nextBelt ? (
+                                    <div
+                                      className="flex items-center gap-1"
+                                      title={`Next: ${nextBelt.name}`}
+                                    >
+                                      <div
+                                        className="w-3 h-3 rounded-full"
+                                        style={{
+                                          backgroundColor: nextBelt.color,
+                                        }}
+                                      ></div>
+                                    </div>
+                                  ) : null}
                                 </div>
                               )}
-
                               {/* Mobile Actions Button */}
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -1319,7 +1372,9 @@ export function ChatroomMessagesEnhanced({
                                 >
                                   <DropdownMenuItem
                                     onClick={() => {
-                                      /* View profile */
+                                      router.push(
+                                        `https://www.worldsamma.org/students/${message.user?.admission_no}`
+                                      );
                                     }}
                                     className="cursor-pointer rounded-lg"
                                   >

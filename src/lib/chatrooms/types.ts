@@ -33,6 +33,7 @@ export type MessageRow = {
   user: {
     id: string;
     full_name: string | null;
+    admission_no: string | null;
     email?: string | null;
     avatar_url: string | null;
     belt_level?: number;

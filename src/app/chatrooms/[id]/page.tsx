@@ -57,6 +57,7 @@ export default async function ChatroomPage({
       user: users_profile!messages_user_id_fkey (
         id,
         full_name,
+        admission_no,
         avatar_url,
         belt_level,
         country_code
