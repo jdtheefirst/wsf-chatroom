@@ -17,16 +17,16 @@ export function getSupabaseClient() {
           flowType: "pkce",
         },
         cookieOptions: {
-          domain: isProduction ? ".worldsamma.org" : undefined, // 👈 Shared cookie for all subdomains
-          sameSite: "lax",
-          secure: isProduction,
-          maxAge: 60 * 60 * 24 * 7, // 7 days
+          // domain: isProduction ? ".worldsamma.org" : undefined, // 👈 Shared cookie for all subdomains
+          // sameSite: "lax",
+          // secure: isProduction,
+          // maxAge: 60 * 60 * 24 * 7, // 7 days
         },
-         realtime: {
-         params: {
-         eventsPerSecond: 10,
+        realtime: {
+          params: {
+            eventsPerSecond: 10,
+          },
         },
-      },
       }
     );
   }

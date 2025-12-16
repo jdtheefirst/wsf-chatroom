@@ -24,10 +24,10 @@ export async function createClient() {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, {
                 ...options,
-                domain: isProduction ? ".worldsamma.org" : undefined,
-                sameSite: "lax",
-                secure: isProduction,
-                maxAge: 60 * 60 * 24 * 7, // 7 days
+                // domain: isProduction ? ".worldsamma.org" : undefined,
+                // sameSite: "lax",
+                // secure: isProduction,
+                // maxAge: 60 * 60 * 24 * 7, // 7 days
               })
             );
           } catch (error) {
