@@ -6,8 +6,6 @@ export const createMiddlewareClient = (
   request: NextRequest,
   response: NextResponse
 ) => {
-  const isProduction = process.env.VERCEL_ENV === "production";
-
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

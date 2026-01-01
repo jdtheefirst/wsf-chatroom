@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sparkles, Lock, GlobeIcon, MessageSquare } from "lucide-react";
 import LoginForm from "./LoginForm";
+import { useAuth } from "@/lib/context/AuthContext";
 
 interface LoginDialogProps {
   open: boolean;
@@ -23,6 +24,14 @@ interface LoginDialogProps {
 export function LoginDialog({ open, onOpenChange, message }: LoginDialogProps) {
   // Local state to track successful login
   const [loginSuccess, setLoginSuccess] = useState(false);
+  const { profile } = useAuth();
+
+  // Use effect to close dialog if user is already logged in
+  useEffect(() => {
+    if (profile && open) {
+      onOpenChange(false);
+    }
+  }, [profile, open, onOpenChange]);
 
   // Close dialog when login is successful
   useEffect(() => {
