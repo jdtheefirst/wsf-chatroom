@@ -99,10 +99,14 @@ export async function generateMetadata({
 
 export default async function ChatroomPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { id } = await params;
+  const searchParamsObj = await searchParams;
+  const messageId = searchParamsObj.messageId as string;
 
   // This will reuse the cached data from generateMetadata
   const { userData, chatroom, chatroomError, messages, supabase } =
@@ -182,6 +186,7 @@ export default async function ChatroomPage({
           allowFiles={chatroom.allow_files}
           shareable={chatroom.shareable}
           initialMessages={messages ?? []}
+          highlightedMessageId={messageId} // Pass the message ID to highlight
         />
       </section>
     </main>

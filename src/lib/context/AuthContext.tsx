@@ -14,7 +14,11 @@ import {
   Session,
   AuthError,
 } from "@supabase/supabase-js";
-import { getSupabaseClient } from "@/lib/supabase/client";
+import {
+  getSupabaseClient,
+  manuallyClearSession,
+  manuallyPersistSession,
+} from "@/lib/supabase/client";
 import { ProfileData } from "@/lib/types/student";
 
 interface AuthContextType {
@@ -28,7 +32,6 @@ interface AuthContextType {
   signInWithMagicLink: (email: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithTwitter: () => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   supabase: ReturnType<typeof getSupabaseClient>;
   deleteFileFromSupabase: (
@@ -42,10 +45,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [supabase] = useState(() => getSupabaseClient());
+  const supabase = getSupabaseClient();
 
   const fetchUserRole = useCallback(
-    async (supabaseUser: SupabaseUser, retryCount = 0) => {
+    async (supabaseUser: SupabaseUser) => {
       setLoading(true);
 
       try {
@@ -55,18 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .eq("id", supabaseUser.id)
           .maybeSingle();
 
-          if (error) {
-        console.error("Error fetching user role:", error.message);
-        
-        if (
-          error.code?.includes("AUTH") ||
-          error.message?.includes("Invalid") ||
-          error.code === "400"
-        ) {
-          await supabase.auth.signOut();
+        if (error) {
+          console.error("Error fetching user role:", error.message);
+
+          if (
+            error.code?.includes("AUTH") ||
+            error.message?.includes("Invalid") ||
+            error.code === "400"
+          ) {
+            await supabase.auth.signOut();
+          }
+          return;
         }
-        return;
-      }
 
         if (!data) {
           console.warn("No user found with that ID.");
@@ -103,80 +106,126 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+    let refreshTimeout: NodeJS.Timeout | null = null;
+
+    const handleAuthError = () => {
+      console.log("Auth error event received");
+      if (mounted) {
+        setProfile(null);
+        setLoading(false);
+        manuallyClearSession();
+      }
+    };
+
+    window.addEventListener("supabase-auth-error", handleAuthError);
 
     const initializeAuth = async () => {
       try {
+        // Try to get session from localStorage first (manual persistence)
+        const storedSession = localStorage.getItem("supabase.auth.token");
+
+        if (storedSession) {
+          const sessionData = JSON.parse(storedSession);
+
+          // Check if session is expired
+          const isExpired = sessionData.expires_at * 1000 < Date.now();
+
+          if (!isExpired) {
+            // Session is valid, use it
+            if (sessionData.user) {
+              await fetchUserRole(sessionData.user);
+            }
+            return;
+          } else {
+            // Session expired, clear it
+            manuallyClearSession();
+          }
+        }
+
+        // No valid stored session, check with Supabase
         const {
           data: { session },
           error,
         } = await supabase.auth.getSession();
 
         if (error) {
-          console.error("Error getting session:", error.message);
-
-          // If it's an auth error, clear the session to prevent infinite retries
-          if (
-            error.message.includes("Invalid Refresh Token") ||
-            error.status === 400
-          ) {
-            await supabase.auth.signOut();
-          }
-
-          setLoading(false);
-          return;
+          console.error("Error getting session:", error);
+          // Clear any invalid session data
+          manuallyClearSession();
         }
 
         if (mounted) {
           if (session?.user) {
+            // Persist this session manually
+            manuallyPersistSession(session);
             await fetchUserRole(session.user);
           } else {
             setLoading(false);
           }
         }
-      } catch (err) {
-        console.error("Unexpected error in initializeAuth:", err);
-        setLoading(false);
+      } catch (error) {
+        console.error("Error in initializeAuth:", error);
+        if (mounted) setLoading(false);
       }
     };
 
     initializeAuth();
 
+    // Set up auth state change listener
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event: string, session: Session | null) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      (async () => {
-        if (session?.user) {
+      console.log("Auth state change:", event);
+
+      if (event === "SIGNED_OUT") {
+        manuallyClearSession();
+        setProfile(null);
+        setLoading(false);
+      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        if (session) {
+          manuallyPersistSession(session);
           await fetchUserRole(session.user);
-        } else {
-          setLoading(false);
         }
-      })(); // wrapped in IIFE
+      } else if (event === "INITIAL_SESSION") {
+        // Initial session loaded, nothing to do
+      }
     });
 
     return () => {
       mounted = false;
+      window.removeEventListener("supabase-auth-error", handleAuthError);
+      if (refreshTimeout) clearTimeout(refreshTimeout);
       subscription.unsubscribe();
     };
   }, [fetchUserRole, supabase]);
 
-  const signIn = async (
-    email: string,
-    password: string
-  ): Promise<{ error: AuthError | null }> => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-    if (error) throw error;
+        if (error) {
+          return { error };
+        }
 
-    const { access_token, refresh_token } = data.session!;
-    await supabase.auth.setSession({ access_token, refresh_token });
+        // Manually persist the session
+        if (data.session) {
+          manuallyPersistSession(data.session);
+        }
 
-    return { error };
-  };
+        return { error: null };
+      } catch (error) {
+        console.error("Sign in error:", error);
+        return { error: error as AuthError };
+      }
+    },
+    [supabase]
+  );
 
   // Login with magic link
   const signInWithMagicLink = async (email: string) => {
@@ -188,17 +237,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok)
       throw new Error(data.error || data.message || "Magic link failed");
-  };
-
-  // Signup with password
-  const signUp = async (email: string, password: string) => {
-    const res = await fetch("/api/auth/signup", {
-      method: "POST",
-      body: JSON.stringify({ email, password }),
-      headers: { "Content-Type": "application/json" },
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Signup failed");
   };
 
   const signInWithGoogle = async (): Promise<void> => {
@@ -221,11 +259,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const signOut = async (): Promise<void> => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-  };
-
+  const signOut = useCallback(async () => {
+    try {
+      manuallyClearSession();
+      setProfile(null);
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Sign out error:", error);
+      throw error;
+    }
+  }, [supabase]);
   /**
    * Deletes a file from Supabase Storage using its public URL.
    * Only works in the browser (requires cookie-based auth).
@@ -272,7 +315,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithMagicLink,
       signInWithGoogle,
       signInWithTwitter,
-      signUp,
       signOut,
       deleteFileFromSupabase,
       supabase,
@@ -287,7 +329,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithMagicLink,
     signInWithTwitter,
     signOut,
-    signUp,
   ]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

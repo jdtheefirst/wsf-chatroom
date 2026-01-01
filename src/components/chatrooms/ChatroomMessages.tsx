@@ -46,6 +46,7 @@ import {
   Trophy,
   TrendingUp,
   Award,
+  Link2,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -66,7 +67,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
 import { PresenceUser } from "@/lib/chatrooms/presence";
 import { EmojiPickerComponent } from "./EmojiPicker";
 import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardItem } from "./LeaderboardItem";
 
 type Props = {
@@ -74,6 +75,7 @@ type Props = {
   allowFiles: boolean;
   shareable: boolean;
   initialMessages: MessageRow[];
+  highlightedMessageId?: string;
 };
 
 export function ChatroomMessagesEnhanced({
@@ -81,6 +83,7 @@ export function ChatroomMessagesEnhanced({
   allowFiles,
   shareable,
   initialMessages,
+  highlightedMessageId,
 }: Props) {
   const { profile, supabase } = useAuth();
   const [messages, setMessages] = useState<MessageRow[]>(initialMessages);
@@ -107,10 +110,16 @@ export function ChatroomMessagesEnhanced({
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
   const chatTitle = getChatroomTitle(chatroom.type);
   const router = useRouter();
-
+  const highlightedMessageRef = useRef<HTMLDivElement>(null);
+  // Add a state to track if we've already scrolled to the highlighted message
+  const [hasScrolledToHighlighted, setHasScrolledToHighlighted] =
+    useState(false);
   // Auto-scroll to bottom
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Only auto-scroll if there's no highlighted message to jump to
+    if (!highlightedMessageId || hasScrolledToHighlighted) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   };
   const [dailyLeaderboard, setDailyLeaderboard] = useState<any[]>([]);
   const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<any[]>([]);
@@ -120,7 +129,7 @@ export function ChatroomMessagesEnhanced({
     position: number;
     messageCount: number;
   } | null>(null);
-
+  const searchParams = useSearchParams();
   const leaderboardRefetchTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch leaderboards
@@ -161,8 +170,65 @@ export function ChatroomMessagesEnhanced({
     }
   };
 
+  // Handle highlighted message scrolling
   useEffect(() => {
-    scrollToBottom();
+    if (
+      highlightedMessageId &&
+      messages.length > 0 &&
+      !hasScrolledToHighlighted
+    ) {
+      // Find the message in the current messages
+      const messageExists = messages.some(
+        (msg) => msg.id === highlightedMessageId
+      );
+
+      if (messageExists) {
+        // Wait a bit for the DOM to render
+        const timer = setTimeout(() => {
+          if (highlightedMessageRef.current) {
+            highlightedMessageRef.current.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+
+            // Add visual highlight effect
+            highlightedMessageRef.current.classList.add("highlight-pulse");
+            setTimeout(() => {
+              highlightedMessageRef.current?.classList.remove(
+                "highlight-pulse"
+              );
+            }, 2000);
+
+            // Mark that we've scrolled to the highlighted message
+            setHasScrolledToHighlighted(true);
+
+            // Clear the URL parameter after successful scroll
+            const newSearchParams = new URLSearchParams(
+              searchParams.toString()
+            );
+            newSearchParams.delete("messageId");
+            router.replace(`?${newSearchParams.toString()}`, { scroll: false });
+          }
+        }, 100);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [
+    highlightedMessageId,
+    messages,
+    hasScrolledToHighlighted,
+    searchParams,
+    router,
+  ]);
+
+  // Original auto-scroll effect - MODIFIED
+  useEffect(() => {
+    // Only auto-scroll on new messages if we haven't specifically scrolled to a highlighted message
+    if (!hasScrolledToHighlighted) {
+      scrollToBottom();
+    }
+
     if (chatroom?.id) {
       fetchLeaderboards();
     }
@@ -172,6 +238,49 @@ export function ChatroomMessagesEnhanced({
       }
     };
   }, [messages, chatroom?.id]);
+
+  // Reset highlighted scroll state when highlightedMessageId changes
+  useEffect(() => {
+    setHasScrolledToHighlighted(false);
+  }, [highlightedMessageId]);
+
+  // Update the shareMessage function
+  const shareMessage = async (messageId: string) => {
+    if (!shareable) {
+      toast.error("This chatroom is not shareable");
+      return;
+    }
+
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) return;
+
+    // Create URL with messageId parameter - updated to include full URL
+    const shareUrl = `${window.location.origin}/chatrooms/${chatroom.id}?messageId=${messageId}`;
+
+    // Use Web Share API if available
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `WSF Chat: ${message.user?.full_name || "User"}`,
+          text:
+            message.content.length > 100
+              ? `${message.content.substring(0, 100)}...`
+              : message.content,
+          url: shareUrl,
+        });
+        toast.success("Message shared!");
+      } catch (err) {
+        // User cancelled share or share failed
+        console.log("Share cancelled:", err);
+        // Fallback to clipboard
+        await copyMessage(shareUrl, messageId);
+      }
+    } else {
+      // Fallback: copy link to clipboard
+      await copyMessage(shareUrl, messageId);
+      toast.success("Link copied to clipboard!");
+    }
+  };
 
   // Realtime subscription for messages
   useEffect(() => {
@@ -558,35 +667,6 @@ export function ChatroomMessagesEnhanced({
     }
   };
 
-  const shareMessage = async (messageId: string) => {
-    if (!shareable) {
-      toast.error("This chatroom is not shareable");
-      return;
-    }
-
-    const message = messages.find((m) => m.id === messageId);
-    if (!message) return;
-
-    const shareUrl = `${window.location.origin}/share/message/${messageId}`;
-    const shareText = `${message.user?.full_name || "User"}: ${
-      message.content
-    }`;
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: "WSF Chatroom Message",
-          text: shareText,
-          url: shareUrl,
-        });
-      } catch (err) {
-        console.error("Share failed:", err);
-      }
-    } else {
-      await copyMessage(shareUrl, messageId);
-    }
-  };
-
   const startEdit = (messageId: string, content: string) => {
     setEditingId(messageId);
     setEditText(content);
@@ -858,6 +938,29 @@ export function ChatroomMessagesEnhanced({
         </div>
       </div>
 
+      {/* Add a "Jump to Shared Message" button when there's a highlighted message */}
+      {highlightedMessageId && !hasScrolledToHighlighted && (
+        <div className="px-4 py-2 bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border-b">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Link2 className="h-4 w-4 text-blue-600" />
+              <span className="text-sm font-medium">Linked to a message</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setHasScrolledToHighlighted(true); // Mark as scrolled
+                // The useEffect will handle the actual scrolling
+              }}
+              className="h-7 text-xs"
+            >
+              Jump to Message
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area with proper overflow handling */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <Tabs
@@ -931,6 +1034,9 @@ export function ChatroomMessagesEnhanced({
                 <div className="p-2 sm:p-6">
                   <div className="max-w-4xl mx-auto space-y-4">
                     {messages.map((message) => {
+                      // Check if this is the highlighted message
+                      const isHighlighted = message.id === highlightedMessageId;
+
                       const beltInfo =
                         message.user?.belt_level !== undefined
                           ? getBeltInfo(message.user.belt_level)
@@ -957,13 +1063,22 @@ export function ChatroomMessagesEnhanced({
                       return (
                         <div
                           key={message.id}
+                          ref={isHighlighted ? highlightedMessageRef : null}
+                          id={`message-${message.id}`}
                           className={cn(
                             "group flex flex-col sm:flex-row gap-3 sm:gap-4 p-4 rounded-2xl transition-all duration-200 hover:bg-muted/30 w-full",
                             message.user_id === profile?.id
                               ? "bg-primary/5 border border-primary/10"
-                              : "bg-card border border-border/50"
+                              : "bg-card border border-border/50",
+                            isHighlighted && "highlighted-message"
                           )}
                         >
+                          {/* Message content with highlight indicator */}
+                          {isHighlighted && (
+                            <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2">
+                              <div className="w-3 h-3 rounded-full bg-blue-500 animate-ping" />
+                            </div>
+                          )}
                           {/* Avatar Section - Full width row on mobile, column on desktop */}
                           <div className="flex items-start gap-3 w-full sm:w-auto">
                             {/* Enhanced Avatar Section */}
