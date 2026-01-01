@@ -1,4 +1,4 @@
-// ChatroomDiscovery - Improved version
+// ChatroomDiscovery - Improved version with sign out button
 "use client";
 
 import { useEffect, useState } from "react";
@@ -27,6 +27,16 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import {
   Lock,
@@ -36,6 +46,10 @@ import {
   AlertCircle,
   Sparkles,
   MessageSquare,
+  LogOut,
+  User,
+  Shield,
+  HelpCircle,
 } from "lucide-react";
 import { LoginDialog } from "../auth/LoginDialog";
 import { ConfettiOnMount } from "../layout/ConfettiOnMount";
@@ -95,7 +109,7 @@ const getEligibilityMessage = (
 };
 
 export function ChatroomDiscovery() {
-  const { supabase, profile, loading: authLoading } = useAuth();
+  const { supabase, profile, loading: authLoading, signOut } = useAuth();
   const router = useRouter();
   const [statuses, setStatuses] = useState<StatusMap>(() =>
     chatrooms.reduce((acc, room) => {
@@ -105,6 +119,8 @@ export function ChatroomDiscovery() {
   );
   const [loading, setLoading] = useState(true);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [showSignOutDialog, setShowSignOutDialog] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   // Update showLoginDialog based on profile changes
   useEffect(() => {
@@ -144,6 +160,21 @@ export function ChatroomDiscovery() {
       cancelled = true;
     };
   }, [profile, supabase, authLoading]);
+
+  const handleSignOut = async () => {
+    try {
+      setSigningOut(true);
+      await signOut();
+      toast.success("Successfully signed out");
+      router.push("/");
+    } catch (error) {
+      console.error("Sign out error:", error);
+      toast.error("Failed to sign out. Please try again.");
+    } finally {
+      setSigningOut(false);
+      setShowSignOutDialog(false);
+    }
+  };
 
   const handleJoin = async (roomId: ChatroomType) => {
     if (!profile) {
@@ -193,6 +224,126 @@ export function ChatroomDiscovery() {
     }
   };
 
+  // Fixed UserProfileMenu component - Single Dialog approach
+  const UserProfileMenu = () => (
+    <div className="absolute right-4 top-4 z-50">
+      <Dialog open={showSignOutDialog} onOpenChange={setShowSignOutDialog}>
+        <div className="flex items-center gap-3">
+          {/* Desktop version with full profile info */}
+          <div className="hidden sm:flex items-center gap-2 rounded-lg border bg-card/80 backdrop-blur-sm px-3 py-2 shadow-sm">
+            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+              <User className="h-4 w-4 text-primary" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium truncate max-w-[120px]">
+                {profile?.full_name || "User"}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {profile?.email?.split("@")[0]}
+              </span>
+            </div>
+            <Separator orientation="vertical" className="h-5" />
+            <DialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 rounded-full hover:bg-destructive/10 hover:text-destructive transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+          </div>
+
+          {/* Mobile version - simplified button */}
+          <div className="sm:hidden">
+            <DialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 rounded-full border-dashed"
+                title="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+          </div>
+        </div>
+
+        {/* SINGLE Dialog Content for both desktop and mobile */}
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <LogOut className="h-5 w-5" />
+              Sign Out
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to sign out? You'll need to sign in again to
+              access chatrooms.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <div className="flex items-center gap-3 rounded-lg border bg-muted/50 p-4">
+              <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt="Profile"
+                    className="h-8 w-8 rounded-full"
+                  />
+                ) : (
+                  <User className="h-5 w-5 text-primary" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium truncate">
+                  {profile?.full_name || "User"}
+                </p>
+                <p className="text-sm text-muted-foreground truncate">
+                  {profile?.email}
+                </p>
+                {profile?.admission_no && (
+                  <p className="text-xs text-muted-foreground">
+                    Admission: {profile.admission_no}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex flex-col-reverse sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowSignOutDialog(false)}
+              disabled={signingOut}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="gap-2"
+            >
+              {signingOut ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Signing out...
+                </>
+              ) : (
+                <>
+                  <LogOut className="h-4 w-4" />
+                  Sign Out
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+
   if (authLoading || loading) {
     return (
       <main className="mx-auto min-h-screen max-w-6xl px-2 sm:px-6 py-12">
@@ -214,7 +365,10 @@ export function ChatroomDiscovery() {
 
   return (
     <>
-      <main className="mx-auto min-h-screen max-w-6xl px-2 sm:px-6 py-12">
+      <main className="mx-auto min-h-screen max-w-6xl px-2 sm:px-6 py-12 relative">
+        {/* Sign Out Button - Top Right */}
+        {profile && <UserProfileMenu />}
+
         {/* Hero Section */}
         <div className="mb-12 text-center">
           <ConfettiOnMount />
@@ -247,6 +401,8 @@ export function ChatroomDiscovery() {
               ? "Browse and join chatrooms based on your membership level"
               : "Sign in to discover chatrooms you can join based on your WSF membership"}
           </p>
+
+          {/* REMOVED the Quick Stats section with duplicate sign out button */}
         </div>
 
         {/* Compact Stats Banner */}
@@ -398,16 +554,29 @@ export function ChatroomDiscovery() {
         <div className="mt-16 rounded-lg border bg-muted/50 p-2 sm:p-6">
           <div className="flex items-start gap-4">
             <div className="rounded-full bg-primary/10 p-2 sm:p-3">
-              <AlertCircle className="h-6 w-6 text-primary" />
+              <HelpCircle className="h-6 w-6 text-primary" />
             </div>
             <div>
               <h3 className="mb-2 text-lg font-semibold">
-                Need help joining a chatroom?
+                Need help with account access?
               </h3>
               <p className="text-muted-foreground text-sm">
-                Some chatrooms require specific membership levels. If you can't
-                join a chatroom you think you should have access to, please
-                contact support or complete your profile information.
+                {profile ? (
+                  <>
+                    If you're having issues with chatroom access or need to
+                    manage your account, you can{" "}
+                    <Button
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() => setShowSignOutDialog(true)}
+                    >
+                      sign out
+                    </Button>{" "}
+                    and sign back in, or contact support for assistance.
+                  </>
+                ) : (
+                  "Sign in to check your eligibility for different chatrooms. Some chatrooms require specific membership levels."
+                )}
               </p>
             </div>
           </div>
