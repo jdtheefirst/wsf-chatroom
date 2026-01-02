@@ -26,6 +26,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithTwitter: () => Promise<void>;
   signOut: () => Promise<void>;
+  supabase: ReturnType<typeof getSupabaseClient>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -346,6 +347,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithTwitter,
       signOut,
+      supabase: supabaseRef.current!,
     }),
     [
       profile,
@@ -355,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithTwitter,
       signOut,
+      supabaseRef,
     ]
   );
 
