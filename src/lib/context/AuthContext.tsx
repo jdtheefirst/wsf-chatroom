@@ -12,11 +12,16 @@ import {
   useRef,
 } from "react";
 import { User as SupabaseUser, AuthError } from "@supabase/supabase-js";
-import { getSupabaseClient, clearAuthData } from "@/lib/supabase/client";
+import {
+  getSupabaseClient,
+  clearAuthData,
+  resetSupabaseClient,
+} from "@/lib/supabase/client";
 import { ProfileData } from "@/lib/types/student";
 
 interface AuthContextType {
   profile: ProfileData | null;
+  setProfile: React.Dispatch<React.SetStateAction<ProfileData | null>>;
   loading: boolean;
   signIn: (
     email: string,
@@ -35,28 +40,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Use refs
+  // Use refs to store the actual instance and prevent re-renders
   const mountedRef = useRef(true);
-  const supabaseRef = useRef<ReturnType<typeof getSupabaseClient> | null>(null);
-  const authSubscriptionRef = useRef<any>(null);
+  const initializedRef = useRef(false);
 
-  // Initialize supabase once - synchronous now
-  useEffect(() => {
-    console.log("[AuthContext] Initializing Supabase client");
-    supabaseRef.current = getSupabaseClient();
-
-    return () => {
-      mountedRef.current = false;
-      if (authSubscriptionRef.current) {
-        console.log("[AuthContext] Cleaning up auth subscription");
-        authSubscriptionRef.current.unsubscribe();
-        authSubscriptionRef.current = null;
-      }
-    };
-  }, []); // Empty dependency array - initialize once
+  // Store the supabase instance in state so it can be passed in context
+  // But we use a ref for the actual operations to prevent dependency loops
+  const [supabase] = useState(() => getSupabaseClient());
+  const supabaseRef = useRef(supabase);
 
   const fetchUserRole = useCallback(async (supabaseUser: SupabaseUser) => {
-    if (!supabaseRef.current || !mountedRef.current) return;
+    if (!mountedRef.current) return;
 
     try {
       const { data, error } = await supabaseRef.current
@@ -115,40 +109,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Listen for token invalid events
   useEffect(() => {
-    mountedRef.current = true;
-
-    const initializeAuth = async () => {
-      if (!supabaseRef.current || !mountedRef.current) {
-        if (mountedRef.current) setLoading(false);
-        return;
+    const handleTokenInvalid = () => {
+      console.log("[AuthContext] Received token invalid event");
+      if (mountedRef.current) {
+        setProfile(null);
+        setLoading(false);
       }
+    };
 
+    window.addEventListener("supabase-token-invalid", handleTokenInvalid);
+
+    return () => {
+      window.removeEventListener("supabase-token-invalid", handleTokenInvalid);
+    };
+  }, []);
+
+  // Check auth state ONCE on mount - without setting up permanent listeners
+  useEffect(() => {
+    if (initializedRef.current || !mountedRef.current) return;
+
+    const checkAuthState = async () => {
       try {
-        console.log("[AuthContext] Initializing auth state");
+        console.log("[AuthContext] Checking initial auth state");
 
-        // Use getSession with a timeout to prevent hanging
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(
-            () => reject(new Error("Auth initialization timeout")),
-            5000
-          )
-        );
-
-        const sessionPromise = supabaseRef.current.auth.getSession();
-
+        // Use a simple session check without auto-refresh
         const {
           data: { session },
           error,
-        } = (await Promise.race([sessionPromise, timeoutPromise])) as any;
+        } = await supabaseRef.current.auth.getSession();
 
         if (error) {
-          console.error("[AuthContext] Error getting session:", error);
+          console.error("[AuthContext] Error getting initial session:", error);
 
-          // If it's an auth error, clear data
-          if (error.message?.includes("auth") || error.status === 401) {
-            console.log("[AuthContext] Clearing auth data due to error");
-            // Don't clear here - let the singleton handle it
+          // If it's an invalid token error, don't retry - just reset
+          if (
+            error.message?.includes("Invalid Refresh Token") ||
+            error.status === 400
+          ) {
+            console.log("[AuthContext] Invalid token detected on init");
+            // The singleton client already handles this, just update UI
           }
 
           if (mountedRef.current) {
@@ -159,114 +160,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (mountedRef.current) {
           if (session?.user) {
-            console.log("[AuthContext] User found, fetching profile");
+            console.log("[AuthContext] Initial user found, fetching profile");
             await fetchUserRole(session.user);
           } else {
-            console.log("[AuthContext] No user session found");
+            console.log("[AuthContext] No initial session found");
             setLoading(false);
           }
         }
       } catch (error: any) {
-        console.error("[AuthContext] Error in initializeAuth:", error);
+        console.error(
+          "[AuthContext] Error checking initial auth state:",
+          error
+        );
         if (mountedRef.current) {
           setLoading(false);
         }
+      } finally {
+        initializedRef.current = true;
       }
     };
 
-    // Set up ONE auth listener for the context
-    const setupAuthListener = () => {
-      if (!supabaseRef.current || authSubscriptionRef.current) return;
-
-      try {
-        console.log("[AuthContext] Setting up auth state listener");
-
-        const {
-          data: { subscription },
-        } = supabaseRef.current.auth.onAuthStateChange(
-          async (event, session) => {
-            if (!mountedRef.current) return;
-
-            console.log(`[AuthContext] Auth state change: ${event}`);
-
-            switch (event) {
-              case "SIGNED_IN":
-              case "USER_UPDATED":
-                if (session?.user) {
-                  await fetchUserRole(session.user);
-                }
-                break;
-
-              case "TOKEN_REFRESHED":
-                if (session?.user) {
-                  // Silently update, no need to fetch profile again unless needed
-                  console.log("[AuthContext] Token refreshed");
-                }
-                break;
-
-              case "SIGNED_OUT":
-                console.log("[AuthContext] SIGNED_OUT event in context");
-                setProfile(null);
-                setLoading(false);
-                // IMPORTANT: Don't call clearAuthData here - singleton handles it
-                break;
-
-              default:
-                if (!session) {
-                  setProfile(null);
-                  setLoading(false);
-                }
-                break;
-            }
-          }
-        );
-
-        authSubscriptionRef.current = subscription;
-      } catch (error) {
-        console.error("[AuthContext] Error setting up auth listener:", error);
-      }
-    };
-
-    initializeAuth();
-    setupAuthListener();
+    checkAuthState();
 
     return () => {
       mountedRef.current = false;
     };
   }, [fetchUserRole]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    if (!supabaseRef.current) {
-      return {
-        error: new Error("Supabase client not initialized") as AuthError,
-      };
-    }
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      try {
+        const { data, error } =
+          await supabaseRef.current.auth.signInWithPassword({
+            email,
+            password,
+          });
 
-    try {
-      const { data, error } = await supabaseRef.current.auth.signInWithPassword(
-        {
-          email,
-          password,
+        if (error) {
+          if (error.status === 429) {
+            return {
+              error: new Error(
+                "Too many attempts. Please wait a few minutes."
+              ) as AuthError,
+            };
+          }
+          return { error };
         }
-      );
 
-      if (error) {
-        if (error.status === 429) {
-          return {
-            error: new Error(
-              "Too many attempts. Please wait a few minutes."
-            ) as AuthError,
-          };
+        // Manually update profile after successful sign in
+        if (data.user && mountedRef.current) {
+          await fetchUserRole(data.user);
         }
-        return { error };
+
+        return { error: null };
+      } catch (error) {
+        console.error("Unexpected sign in error:", error);
+        return { error: error as AuthError };
       }
-
-      return { error: null };
-    } catch (error) {
-      console.error("Unexpected sign in error:", error);
-      return { error: error as AuthError };
-    }
-  }, []);
+    },
+    [fetchUserRole]
+  );
 
   const signInWithMagicLink = useCallback(async (email: string) => {
     const res = await fetch("/api/auth/magic-link", {
@@ -280,9 +233,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = useCallback(async (): Promise<void> => {
-    if (!supabaseRef.current)
-      throw new Error("Supabase client not initialized");
-
     const { error } = await supabaseRef.current.auth.signInWithOAuth({
       provider: "google",
       options: {
@@ -293,9 +243,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithTwitter = useCallback(async (): Promise<void> => {
-    if (!supabaseRef.current)
-      throw new Error("Supabase client not initialized");
-
     const { error } = await supabaseRef.current.auth.signInWithOAuth({
       provider: "twitter",
       options: {
@@ -311,15 +258,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Clear local state first
       setProfile(null);
-      setLoading(false);
+      setLoading(true);
 
-      // Sign out from Supabase if client exists
-      if (supabaseRef.current) {
-        await supabaseRef.current.auth.signOut();
-      }
+      // Sign out from Supabase
+      await supabaseRef.current.auth.signOut();
 
-      // Clear auth data
-      clearAuthData();
+      // Reset the client to clear any cached state
+      resetSupabaseClient();
 
       // Redirect to home
       if (typeof window !== "undefined") {
@@ -327,10 +272,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error("Sign out error:", error);
-      // Even if Supabase fails, clear local data and redirect
+      // Even if Supabase fails, clear everything and redirect
       setProfile(null);
       setLoading(false);
-      clearAuthData();
+      resetSupabaseClient();
 
       if (typeof window !== "undefined") {
         window.location.href = "/";
@@ -341,13 +286,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextType>(
     () => ({
       profile,
+      setProfile,
       loading,
       signIn,
       signInWithMagicLink,
       signInWithGoogle,
       signInWithTwitter,
       signOut,
-      supabase: supabaseRef.current!,
+      supabase, // Pass the instance in context
     }),
     [
       profile,
@@ -357,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithTwitter,
       signOut,
-      supabaseRef,
+      supabase, // Include in dependencies
     ]
   );
 

@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 import { Providers } from "@/app/providers";
+import AuthLoopBreaker from "@/components/auth/AuthLoopBreaker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -219,6 +220,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <Providers>
+          <AuthLoopBreaker />
           {/* Global loading indicator for page transitions */}
           <div
             id="global-loader"
