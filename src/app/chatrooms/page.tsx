@@ -6,8 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function ChatroomIndex() {
   const supabase = await createClient();
-  const { data: session } = await supabase.auth.getSession();
-  const userId = session?.session?.user?.id ?? null;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const userId = user?.id ?? null;
 
   let joined: { chatroom_id: string }[] = [];
   if (userId) {
@@ -69,4 +71,3 @@ export default async function ChatroomIndex() {
     </main>
   );
 }
-

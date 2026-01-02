@@ -1,3 +1,4 @@
+// /lib/context/AuthContext.tsx
 "use client";
 
 import {
@@ -9,16 +10,8 @@ import {
   useCallback,
   ReactNode,
 } from "react";
-import {
-  User as SupabaseUser,
-  Session,
-  AuthError,
-} from "@supabase/supabase-js";
-import {
-  getSupabaseClient,
-  manuallyClearSession,
-  manuallyPersistSession,
-} from "@/lib/supabase/client";
+import { User as SupabaseUser, AuthError } from "@supabase/supabase-js";
+import { getSupabaseClient, clearAuthData } from "@/lib/supabase/client";
 import { ProfileData } from "@/lib/types/student";
 
 interface AuthContextType {
@@ -34,10 +27,6 @@ interface AuthContextType {
   signInWithTwitter: () => Promise<void>;
   signOut: () => Promise<void>;
   supabase: ReturnType<typeof getSupabaseClient>;
-  deleteFileFromSupabase: (
-    fileUrl: string,
-    bucketName: string
-  ) => Promise<boolean>; // ✅ Also needed!
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -45,7 +34,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const supabase = getSupabaseClient();
+  const supabase = getSupabaseClient(); // This now returns the singleton
 
   const fetchUserRole = useCallback(
     async (supabaseUser: SupabaseUser) => {
@@ -59,44 +48,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .maybeSingle();
 
         if (error) {
-          console.error("Error fetching user role:", error.message);
-
-          if (
-            error.code?.includes("AUTH") ||
-            error.message?.includes("Invalid") ||
-            error.code === "400"
-          ) {
-            await supabase.auth.signOut();
-          }
+          console.error("Error fetching user role:", error);
+          setProfile(null);
           return;
         }
 
-        if (!data) {
-          console.warn("No user found with that ID.");
-          return;
+        if (data) {
+          const profileData: ProfileData = {
+            id: data.id,
+            email: data.email,
+            full_name: data.full_name,
+            country_code: data.country_code,
+            county_code: data.county_code,
+            postal_address: data.postal_address,
+            phone_number: data.phone_number || "",
+            avatar_url: data.avatar_url,
+            language: data.language,
+            gender: data.gender,
+            admission_no: data.admission_no,
+            belt_level: data.belt_level,
+            role: data.role,
+            referred_by: data.referred_by,
+            elite_plus: data.elite_plus,
+            overall_performance: data.overall_performance,
+            completed_all_programs: data.completed_all_programs,
+            elite_plus_certified_at: data.elite_plus_certified_at,
+            total_training_hours: data.total_training_hours,
+            masters_rank: data.masters_rank,
+            years_of_training: data.years_of_training,
+            specializations: data.specializations,
+            elite_plus_level: data.elite_plus_level,
+          };
+          setProfile(profileData);
+        } else {
+          setProfile(null);
         }
-
-        // Remove password fields and ensure type consistency
-        const profileData: ProfileData = {
-          id: data.id,
-          email: data.email,
-          full_name: data.full_name,
-          country_code: data.country_code,
-          county_code: data.county_code,
-          postal_address: data.postal_address,
-          phone_number: data.phone_number || "",
-          avatar_url: data.avatar_url,
-          language: data.language,
-          gender: data.gender,
-          admission_no: data.admission_no,
-          belt_level: data.belt_level,
-          role: data.role,
-          referred_by: data.referred_by,
-        };
-
-        setProfile(profileData);
       } catch (err) {
         console.error("Unexpected error in fetchUserRole:", err);
+        setProfile(null);
       } finally {
         setLoading(false);
       }
@@ -106,43 +95,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    let refreshTimeout: NodeJS.Timeout | null = null;
-
-    const handleAuthError = () => {
-      console.log("Auth error event received");
-      if (mounted) {
-        setProfile(null);
-        setLoading(false);
-        manuallyClearSession();
-      }
-    };
-
-    window.addEventListener("supabase-auth-error", handleAuthError);
 
     const initializeAuth = async () => {
       try {
-        // Try to get session from localStorage first (manual persistence)
-        const storedSession = localStorage.getItem("supabase.auth.token");
-
-        if (storedSession) {
-          const sessionData = JSON.parse(storedSession);
-
-          // Check if session is expired
-          const isExpired = sessionData.expires_at * 1000 < Date.now();
-
-          if (!isExpired) {
-            // Session is valid, use it
-            if (sessionData.user) {
-              await fetchUserRole(sessionData.user);
-            }
-            return;
-          } else {
-            // Session expired, clear it
-            manuallyClearSession();
-          }
-        }
-
-        // No valid stored session, check with Supabase
+        // Use getSession on client side (fast, reads from cookies)
         const {
           data: { session },
           error,
@@ -150,14 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) {
           console.error("Error getting session:", error);
-          // Clear any invalid session data
-          manuallyClearSession();
+          if (mounted) setLoading(false);
+          return;
         }
 
         if (mounted) {
           if (session?.user) {
-            // Persist this session manually
-            manuallyPersistSession(session);
             await fetchUserRole(session.user);
           } else {
             setLoading(false);
@@ -171,7 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     initializeAuth();
 
-    // Set up auth state change listener
+    // Single auth state change listener
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -179,24 +133,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log("Auth state change:", event);
 
-      if (event === "SIGNED_OUT") {
-        manuallyClearSession();
-        setProfile(null);
-        setLoading(false);
-      } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-        if (session) {
-          manuallyPersistSession(session);
-          await fetchUserRole(session.user);
-        }
-      } else if (event === "INITIAL_SESSION") {
-        // Initial session loaded, nothing to do
+      switch (event) {
+        case "SIGNED_IN":
+        case "TOKEN_REFRESHED":
+        case "USER_UPDATED":
+          if (session?.user) {
+            await fetchUserRole(session.user);
+          }
+          break;
+
+        case "SIGNED_OUT":
+          setProfile(null);
+          setLoading(false);
+          break;
+
+        default:
+          // For INITIAL_SESSION or other events
+          if (!session) {
+            setProfile(null);
+            setLoading(false);
+          }
+          break;
       }
     });
 
     return () => {
       mounted = false;
-      window.removeEventListener("supabase-auth-error", handleAuthError);
-      if (refreshTimeout) clearTimeout(refreshTimeout);
       subscription.unsubscribe();
     };
   }, [fetchUserRole, supabase]);
@@ -210,17 +172,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (error) {
+          // Check for rate limiting
+          if (error.status === 429) {
+            return {
+              error: new Error(
+                "Too many attempts. Please wait a few minutes."
+              ) as AuthError,
+            };
+          }
           return { error };
-        }
-
-        // Manually persist the session
-        if (data.session) {
-          manuallyPersistSession(data.session);
         }
 
         return { error: null };
       } catch (error) {
-        console.error("Sign in error:", error);
+        console.error("Unexpected sign in error:", error);
         return { error: error as AuthError };
       }
     },
@@ -259,55 +224,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (): Promise<void> => {
     try {
-      manuallyClearSession();
+      // Clear local state first
       setProfile(null);
+
+      // Clear auth data
+      clearAuthData();
+
+      // Sign out from Supabase
       await supabase.auth.signOut();
+
+      // Optional: Redirect to login
+      if (typeof window !== "undefined") {
+        window.location.href = "/";
+      }
     } catch (error) {
       console.error("Sign out error:", error);
+      // Even if Supabase fails, clear local data
+      setProfile(null);
+      clearAuthData();
       throw error;
     }
   }, [supabase]);
-  /**
-   * Deletes a file from Supabase Storage using its public URL.
-   * Only works in the browser (requires cookie-based auth).
-   */
-  const deleteFileFromSupabase = async (
-    fileUrl: string | null,
-    bucketName: string | null
-  ): Promise<boolean> => {
-    if (!fileUrl || !bucketName) {
-      console.warn("Missing URL or bucket name.");
-      return false;
-    }
 
-    try {
-      const prefix = "/storage/v1/object/public/";
-      const [_, path] = fileUrl.split(prefix);
-
-      if (!path) {
-        console.warn("Invalid Supabase URL format:", fileUrl);
-        return false;
-      }
-
-      const { error } = await supabase.storage.from(bucketName).remove([path]);
-
-      if (error) {
-        console.error("Supabase delete error:", error.message);
-        return false;
-      }
-
-      console.log("Deleted from Supabase:", path);
-      return true;
-    } catch (err) {
-      console.error("Unexpected delete error:", err);
-      return false;
-    }
-  };
-
-  const value = useMemo<AuthContextType>(() => {
-    return {
+  const value = useMemo<AuthContextType>(
+    () => ({
       profile,
       setProfile,
       loading,
@@ -316,20 +258,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithTwitter,
       signOut,
-      deleteFileFromSupabase,
       supabase,
-    };
-  }, [
-    profile,
-    loading,
-    supabase,
-    deleteFileFromSupabase,
-    signIn,
-    signInWithGoogle,
-    signInWithMagicLink,
-    signInWithTwitter,
-    signOut,
-  ]);
+    }),
+    [
+      profile,
+      loading,
+      signIn,
+      signInWithMagicLink,
+      signInWithGoogle,
+      signInWithTwitter,
+      signOut,
+      supabase,
+    ]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -22,6 +22,7 @@ export async function POST(request: Request) {
       error: userErr,
     } = await supabase.auth.getUser();
     if (userErr || !user) {
+      console.error("Authentication error", userErr);
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
     }
 
@@ -35,9 +36,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    const targetCountry: string | null = 
+    const targetCountry: string | null =
       chatroomId === "psa" || chatroomId === "nsa"
-        ? (country_code ?? profile.country_code ?? null)
+        ? country_code ?? profile.country_code ?? null
         : null;
 
     const eligibility = await checkEligibility(
@@ -46,9 +47,12 @@ export async function POST(request: Request) {
       chatroomId,
       targetCountry
     );
-    
+
     if (eligibility.state !== "eligible") {
-      const reason = eligibility.state === "ineligible" ? eligibility.reason : "Not eligible";
+      const reason =
+        eligibility.state === "ineligible"
+          ? eligibility.reason
+          : "Not eligible";
       return NextResponse.json({ error: reason }, { status: 403 });
     }
 
@@ -69,22 +73,27 @@ export async function POST(request: Request) {
     const roomConfig = chatrooms.find((c) => c.id === chatroomId);
 
     // Call the database function
-    const { data: chatroomResult, error: chatroomError } = await supabase
-      .rpc('get_or_create_chatroom', {
+    const { data: chatroomResult, error: chatroomError } = await supabase.rpc(
+      "get_or_create_chatroom",
+      {
         p_type: chatroomId,
         p_title: roomConfig?.title ?? chatroomId,
         p_country_code: targetCountry,
         p_visibility: roomConfig?.visibility ?? "private",
         p_shareable: chatroomId === "wsf_fans",
-        p_allow_files: 
+        p_allow_files:
           chatroomId === "wsf_club_owners" || chatroomId === "wsf_committee",
         p_created_by: user.id,
-      });
+      }
+    );
 
     if (chatroomError) {
       console.error("Chatroom RPC error:", chatroomError);
       return NextResponse.json(
-        { error: "Failed to get or create chatroom", details: chatroomError.message },
+        {
+          error: "Failed to get or create chatroom",
+          details: chatroomError.message,
+        },
         { status: 500 }
       );
     }
@@ -100,7 +109,7 @@ export async function POST(request: Request) {
     // ✅ chatroomResult is the UUID string itself
     const chatroomIdToUse = chatroomResult;
 
-    console.log('RPC successful, chatroom ID:', chatroomIdToUse);
+    console.log("RPC successful, chatroom ID:", chatroomIdToUse);
 
     // Check if user is already a member
     const { data: existingMember } = await supabaseAdmin
@@ -129,9 +138,9 @@ export async function POST(request: Request) {
       }
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       chatroom_id: chatroomIdToUse,
-      already_member: !!existingMember 
+      already_member: !!existingMember,
     });
   } catch (err: any) {
     console.error("Join route error", err);
@@ -141,4 +150,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

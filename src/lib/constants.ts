@@ -15,6 +15,17 @@ export const getBeltColor = (level: number) => {
   return colors[Math.min(level, colors.length - 1)] || colors[0];
 };
 
+export const getElitePlusLevelInfo = (level: number) => {
+  const levels = [
+    { name: "Master", description: "Certified Elite Plus Level 1" },
+    { name: "Senior Master", description: "Certified Elite Plus Level 2" },
+    { name: "Professor", description: "Certified Elite Plus Level 3" },
+    { name: "Senior Professor", description: "Certified Elite Plus Level 4" },
+    { name: "Tabibu", description: "Certified Elite Plus Level 5" },
+  ];
+  return levels[Math.min(level - 1, levels.length - 1)] || null;
+};
+
 export const beltOptions = [
   {
     name: "White Belt",
@@ -59,25 +70,25 @@ export const beltOptions = [
     level: 6,
   },
   {
-    name: "Black 1st Shahada",
+    name: "1st Black Shahada",
     color: "#000000",
     program: "Advanced Program",
     level: 7,
   },
   {
-    name: "Black 2nd Shahada",
+    name: "2nd Black Shahada",
     color: "#111111",
     program: "Elite Program",
     level: 8,
   },
   {
-    name: "Black 3rd Shahada",
+    name: "3rd Black Shahada",
     color: "#222222",
     program: "Elite Program",
     level: 9,
   },
   {
-    name: "Black 4th Shahada",
+    name: "4th Black Shahada",
     color: "#333333",
     program: "Elite Program",
     level: 10,

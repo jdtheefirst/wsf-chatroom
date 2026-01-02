@@ -56,6 +56,15 @@ export interface ProfileData {
   belt_level: number;
   role: string;
   referred_by?: string;
+  elite_plus?: boolean;
+  overall_performance?: string;
+  completed_all_programs?: boolean;
+  elite_plus_certified_at?: string;
+  total_training_hours?: number;
+  masters_rank?: string;
+  years_of_training?: number;
+  specializations?: string[];
+  elite_plus_level?: string;
 }
 
 export interface ClubMembership {

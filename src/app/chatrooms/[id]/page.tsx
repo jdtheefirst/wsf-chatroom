@@ -40,7 +40,11 @@ const getChatroomData = cache(async (id: string) => {
           admission_no,
           avatar_url,
           belt_level,
-          country_code
+          country_code,
+          elite_plus,
+          overall_performance,
+          completed_all_programs,
+          elite_plus_level
         )
       `
       )

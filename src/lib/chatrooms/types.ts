@@ -38,6 +38,10 @@ export type MessageRow = {
     avatar_url: string | null;
     belt_level?: number;
     role?: string;
+    elite_plus?: boolean;
+    overall_performance?: string | null;
+    completed_all_programs?: boolean;
+    elite_plus_level?: number | null;
   } | null;
 };
 

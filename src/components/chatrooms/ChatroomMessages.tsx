@@ -60,6 +60,7 @@ import {
   getBeltInfo,
   getChatroomTitle,
   getCurrentProgram,
+  getElitePlusLevelInfo,
   getNextBelt,
   getProgressPercentage,
 } from "@/lib/constants";
@@ -306,7 +307,7 @@ export function ChatroomMessagesEnhanced({
           const { data: userProfile } = await supabase
             .from("users_profile")
             .select(
-              "id, full_name, admission_no, avatar_url, belt_level, country_code"
+              "id, full_name, admission_no, avatar_url, belt_level, country_code, elite_plus, overall_performance, completed_all_programs, elite_plus_level"
             )
             .eq("id", newMessage.user_id)
             .single();
@@ -396,6 +397,10 @@ export function ChatroomMessagesEnhanced({
           avatar_url: profile.avatar_url,
           belt_level: profile.belt_level || 0,
           country_code: profile.country_code || "unknown",
+          elite_plus: profile.elite_plus,
+          overall_performance: profile.overall_performance,
+          completed_all_programs: profile.completed_all_programs,
+          elite_plus_level: profile.elite_plus_level,
         };
 
         if (!userData) {
@@ -455,6 +460,10 @@ export function ChatroomMessagesEnhanced({
                     avatar_url: userData.avatar_url,
                     belt_level: userData.belt_level,
                     country_code: userData.country_code,
+                    elite_plus: userData.elite_plus,
+                    overall_performance: userData.overall_performance,
+                    completed_all_programs: userData.completed_all_programs,
+                    elite_plus_level: userData.elite_plus_level,
                     online_at: new Date().toISOString(),
                   });
                   processAndUpdate();
@@ -501,6 +510,10 @@ export function ChatroomMessagesEnhanced({
             const avatar_url = presence.avatar_url;
             const belt_level = presence.belt_level || 0;
             const country_code = presence.country_code || "unknown";
+            const elite_plus = presence.elite_plus;
+            const overall_performance = presence.overall_performance;
+            const completed_all_programs = presence.completed_all_programs;
+            const elite_plus_level = presence.elite_plus_level;
             const online_at = presence.online_at;
 
             const lastSeen = online_at ? new Date(online_at).getTime() : now;
@@ -514,6 +527,10 @@ export function ChatroomMessagesEnhanced({
               avatar_url,
               belt_level,
               country_code,
+              elite_plus,
+              overall_performance,
+              completed_all_programs,
+              elite_plus_level,
               last_seen: lastSeen,
               status: isAway ? "away" : "online",
             });
@@ -1042,6 +1059,12 @@ export function ChatroomMessagesEnhanced({
                           ? getBeltInfo(message.user.belt_level)
                           : null;
 
+                      const eliteLevel = message.user?.elite_plus
+                        ? getElitePlusLevelInfo(
+                            message.user.elite_plus_level || 0
+                          )
+                        : null;
+
                       const nextBelt =
                         message.user?.belt_level !== undefined
                           ? getNextBelt(message.user.belt_level)
@@ -1197,6 +1220,16 @@ export function ChatroomMessagesEnhanced({
                                     >
                                       {beltInfo.program.split(" ")[0]}
                                     </Badge>
+
+                                    {/* Elite Plus Badge */}
+                                    {eliteLevel && (
+                                      <Badge
+                                        variant="destructive"
+                                        className="text-[10px] py-0 px-1.5 font-normal"
+                                      >
+                                        Elite+ {eliteLevel.name}
+                                      </Badge>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -1482,7 +1515,7 @@ export function ChatroomMessagesEnhanced({
                                     <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-0.5">
                                       {isMaxLevel ? (
                                         <span className="truncate font-medium text-green-600">
-                                          🏆 GM Level Achieved!
+                                          🏆 Master Level Achieved!
                                         </span>
                                       ) : nextBelt ? (
                                         <>
