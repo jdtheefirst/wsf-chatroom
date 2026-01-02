@@ -9,6 +9,7 @@ import {
   useMemo,
   useCallback,
   ReactNode,
+  useRef,
 } from "react";
 import { User as SupabaseUser, AuthError } from "@supabase/supabase-js";
 import { getSupabaseClient, clearAuthData } from "@/lib/supabase/client";
@@ -16,7 +17,6 @@ import { ProfileData } from "@/lib/types/student";
 
 interface AuthContextType {
   profile: ProfileData | null;
-  setProfile: React.Dispatch<React.SetStateAction<ProfileData | null>>;
   loading: boolean;
   signIn: (
     email: string,
@@ -26,7 +26,6 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithTwitter: () => Promise<void>;
   signOut: () => Promise<void>;
-  supabase: ReturnType<typeof getSupabaseClient>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -34,208 +33,241 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const supabase = getSupabaseClient(); // This now returns the singleton
 
-  const fetchUserRole = useCallback(
-    async (supabaseUser: SupabaseUser) => {
-      setLoading(true);
+  // Use refs
+  const mountedRef = useRef(true);
+  const supabaseRef = useRef<ReturnType<typeof getSupabaseClient> | null>(null);
+  const authSubscriptionRef = useRef<any>(null);
 
-      try {
-        const { data, error } = await supabase
-          .from("users_profile")
-          .select("*")
-          .eq("id", supabaseUser.id)
-          .maybeSingle();
+  // Initialize supabase once - synchronous now
+  useEffect(() => {
+    console.log("[AuthContext] Initializing Supabase client");
+    supabaseRef.current = getSupabaseClient();
 
-        if (error) {
-          console.error("Error fetching user role:", error);
+    return () => {
+      mountedRef.current = false;
+      if (authSubscriptionRef.current) {
+        console.log("[AuthContext] Cleaning up auth subscription");
+        authSubscriptionRef.current.unsubscribe();
+        authSubscriptionRef.current = null;
+      }
+    };
+  }, []); // Empty dependency array - initialize once
+
+  const fetchUserRole = useCallback(async (supabaseUser: SupabaseUser) => {
+    if (!supabaseRef.current || !mountedRef.current) return;
+
+    try {
+      const { data, error } = await supabaseRef.current
+        .from("users_profile")
+        .select("*")
+        .eq("id", supabaseUser.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error("[AuthContext] Error fetching user role:", error);
+        if (mountedRef.current) {
           setProfile(null);
-          return;
+          setLoading(false);
         }
+        return;
+      }
 
-        if (data) {
-          const profileData: ProfileData = {
-            id: data.id,
-            email: data.email,
-            full_name: data.full_name,
-            country_code: data.country_code,
-            county_code: data.county_code,
-            postal_address: data.postal_address,
-            phone_number: data.phone_number || "",
-            avatar_url: data.avatar_url,
-            language: data.language,
-            gender: data.gender,
-            admission_no: data.admission_no,
-            belt_level: data.belt_level,
-            role: data.role,
-            referred_by: data.referred_by,
-            elite_plus: data.elite_plus,
-            overall_performance: data.overall_performance,
-            completed_all_programs: data.completed_all_programs,
-            elite_plus_certified_at: data.elite_plus_certified_at,
-            total_training_hours: data.total_training_hours,
-            masters_rank: data.masters_rank,
-            years_of_training: data.years_of_training,
-            specializations: data.specializations,
-            elite_plus_level: data.elite_plus_level,
-          };
-          setProfile(profileData);
-        } else {
-          setProfile(null);
-        }
-      } catch (err) {
-        console.error("Unexpected error in fetchUserRole:", err);
+      if (data && mountedRef.current) {
+        const profileData: ProfileData = {
+          id: data.id,
+          email: data.email,
+          full_name: data.full_name,
+          country_code: data.country_code,
+          county_code: data.county_code,
+          postal_address: data.postal_address,
+          phone_number: data.phone_number || "",
+          avatar_url: data.avatar_url,
+          language: data.language,
+          gender: data.gender,
+          admission_no: data.admission_no,
+          belt_level: data.belt_level,
+          role: data.role,
+          referred_by: data.referred_by,
+          elite_plus: data.elite_plus,
+          overall_performance: data.overall_performance,
+          completed_all_programs: data.completed_all_programs,
+          elite_plus_certified_at: data.elite_plus_certified_at,
+          total_training_hours: data.total_training_hours,
+          masters_rank: data.masters_rank,
+          years_of_training: data.years_of_training,
+          specializations: data.specializations,
+          elite_plus_level: data.elite_plus_level,
+        };
+        setProfile(profileData);
+        setLoading(false);
+      } else if (mountedRef.current) {
         setProfile(null);
-      } finally {
         setLoading(false);
       }
-    },
-    [supabase]
-  );
+    } catch (err) {
+      console.error("[AuthContext] Unexpected error in fetchUserRole:", err);
+      if (mountedRef.current) {
+        setProfile(null);
+        setLoading(false);
+      }
+    }
+  }, []);
 
-  // /lib/context/AuthContext.tsx - Updated useEffect
   useEffect(() => {
-    let mounted = true;
-    let initializationAttempts = 0;
-    const MAX_INIT_ATTEMPTS = 3;
+    mountedRef.current = true;
 
     const initializeAuth = async () => {
-      if (!mounted) return;
+      if (!supabaseRef.current || !mountedRef.current) {
+        if (mountedRef.current) setLoading(false);
+        return;
+      }
 
       try {
-        // Use getSession but with error boundaries
+        console.log("[AuthContext] Initializing auth state");
+
+        // Use getSession with a timeout to prevent hanging
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("Auth initialization timeout")),
+            5000
+          )
+        );
+
+        const sessionPromise = supabaseRef.current.auth.getSession();
+
         const {
           data: { session },
           error,
-        } = await supabase.auth.getSession();
+        } = (await Promise.race([sessionPromise, timeoutPromise])) as any;
 
         if (error) {
-          console.error("Error getting session:", error);
+          console.error("[AuthContext] Error getting session:", error);
 
-          // Critical: If we get auth errors during initialization, clear everything
-          if (error.message?.includes("refresh") || error.status === 401) {
-            console.warn("Auth error during init, clearing auth data");
-            clearAuthData();
+          // If it's an auth error, clear data
+          if (error.message?.includes("auth") || error.status === 401) {
+            console.log("[AuthContext] Clearing auth data due to error");
+            // Don't clear here - let the singleton handle it
           }
 
-          if (mounted) setLoading(false);
+          if (mountedRef.current) {
+            setLoading(false);
+          }
           return;
         }
 
-        if (mounted) {
+        if (mountedRef.current) {
           if (session?.user) {
+            console.log("[AuthContext] User found, fetching profile");
             await fetchUserRole(session.user);
           } else {
+            console.log("[AuthContext] No user session found");
             setLoading(false);
           }
         }
       } catch (error: any) {
-        console.error("Error in initializeAuth:", error);
-
-        // Handle token refresh loop errors
-        if (
-          error.message?.includes("refresh") ||
-          error.message?.includes("invalid") ||
-          error.status === 401
-        ) {
-          initializationAttempts++;
-
-          if (initializationAttempts >= MAX_INIT_ATTEMPTS) {
-            console.error(
-              "Too many auth initialization failures, forcing cleanup"
-            );
-            clearAuthData();
-            setProfile(null);
-          }
+        console.error("[AuthContext] Error in initializeAuth:", error);
+        if (mountedRef.current) {
+          setLoading(false);
         }
-
-        if (mounted) setLoading(false);
       }
     };
 
-    // Single auth state change listener
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return;
+    // Set up ONE auth listener for the context
+    const setupAuthListener = () => {
+      if (!supabaseRef.current || authSubscriptionRef.current) return;
 
-      console.log("Auth state change in context:", event);
+      try {
+        console.log("[AuthContext] Setting up auth state listener");
 
-      switch (event) {
-        case "SIGNED_IN":
-        case "TOKEN_REFRESHED":
-        case "USER_UPDATED":
-          if (session?.user) {
-            await fetchUserRole(session.user);
+        const {
+          data: { subscription },
+        } = supabaseRef.current.auth.onAuthStateChange(
+          async (event, session) => {
+            if (!mountedRef.current) return;
+
+            console.log(`[AuthContext] Auth state change: ${event}`);
+
+            switch (event) {
+              case "SIGNED_IN":
+              case "USER_UPDATED":
+                if (session?.user) {
+                  await fetchUserRole(session.user);
+                }
+                break;
+
+              case "TOKEN_REFRESHED":
+                if (session?.user) {
+                  // Silently update, no need to fetch profile again unless needed
+                  console.log("[AuthContext] Token refreshed");
+                }
+                break;
+
+              case "SIGNED_OUT":
+                console.log("[AuthContext] SIGNED_OUT event in context");
+                setProfile(null);
+                setLoading(false);
+                // IMPORTANT: Don't call clearAuthData here - singleton handles it
+                break;
+
+              default:
+                if (!session) {
+                  setProfile(null);
+                  setLoading(false);
+                }
+                break;
+            }
           }
-          break;
+        );
 
-        case "SIGNED_OUT":
-          setProfile(null);
-          setLoading(false);
-          // Clear auth data on sign out
-          clearAuthData();
-          break;
-
-        case "TOKEN_REFRESHED":
-          if (!session) {
-            // This is critical - token refresh failed but returned no session
-            console.error("Token refresh failed, session is null");
-            setProfile(null);
-            setLoading(false);
-            clearAuthData();
-          }
-          break;
-
-        default:
-          if (!session) {
-            setProfile(null);
-            setLoading(false);
-          }
-          break;
+        authSubscriptionRef.current = subscription;
+      } catch (error) {
+        console.error("[AuthContext] Error setting up auth listener:", error);
       }
-    });
+    };
 
-    // Initialize auth
     initializeAuth();
+    setupAuthListener();
 
     return () => {
-      mounted = false;
-      subscription.unsubscribe();
+      mountedRef.current = false;
     };
-  }, [fetchUserRole, supabase]);
+  }, [fetchUserRole]);
 
-  const signIn = useCallback(
-    async (email: string, password: string) => {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
+  const signIn = useCallback(async (email: string, password: string) => {
+    if (!supabaseRef.current) {
+      return {
+        error: new Error("Supabase client not initialized") as AuthError,
+      };
+    }
+
+    try {
+      const { data, error } = await supabaseRef.current.auth.signInWithPassword(
+        {
           email,
           password,
-        });
-
-        if (error) {
-          // Check for rate limiting
-          if (error.status === 429) {
-            return {
-              error: new Error(
-                "Too many attempts. Please wait a few minutes."
-              ) as AuthError,
-            };
-          }
-          return { error };
         }
+      );
 
-        return { error: null };
-      } catch (error) {
-        console.error("Unexpected sign in error:", error);
-        return { error: error as AuthError };
+      if (error) {
+        if (error.status === 429) {
+          return {
+            error: new Error(
+              "Too many attempts. Please wait a few minutes."
+            ) as AuthError,
+          };
+        }
+        return { error };
       }
-    },
-    [supabase]
-  );
 
-  // Login with magic link
-  const signInWithMagicLink = async (email: string) => {
+      return { error: null };
+    } catch (error) {
+      console.error("Unexpected sign in error:", error);
+      return { error: error as AuthError };
+    }
+  }, []);
+
+  const signInWithMagicLink = useCallback(async (email: string) => {
     const res = await fetch("/api/auth/magic-link", {
       method: "POST",
       body: JSON.stringify({ email }),
@@ -244,63 +276,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!res.ok)
       throw new Error(data.error || data.message || "Magic link failed");
-  };
+  }, []);
 
-  const signInWithGoogle = async (): Promise<void> => {
-    const { error } = await supabase.auth.signInWithOAuth({
+  const signInWithGoogle = useCallback(async (): Promise<void> => {
+    if (!supabaseRef.current)
+      throw new Error("Supabase client not initialized");
+
+    const { error } = await supabaseRef.current.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
     if (error) throw error;
-  };
+  }, []);
 
-  const signInWithTwitter = async (): Promise<void> => {
-    const { error } = await supabase.auth.signInWithOAuth({
+  const signInWithTwitter = useCallback(async (): Promise<void> => {
+    if (!supabaseRef.current)
+      throw new Error("Supabase client not initialized");
+
+    const { error } = await supabaseRef.current.auth.signInWithOAuth({
       provider: "twitter",
       options: {
         redirectTo: `${window.location.origin}/auth/callback`,
       },
     });
     if (error) throw error;
-  };
+  }, []);
 
   const signOut = useCallback(async (): Promise<void> => {
     try {
+      console.log("[AuthContext] Starting sign out");
+
       // Clear local state first
       setProfile(null);
+      setLoading(false);
+
+      // Sign out from Supabase if client exists
+      if (supabaseRef.current) {
+        await supabaseRef.current.auth.signOut();
+      }
 
       // Clear auth data
       clearAuthData();
 
-      // Sign out from Supabase
-      await supabase.auth.signOut();
-
-      // Optional: Redirect to login
+      // Redirect to home
       if (typeof window !== "undefined") {
         window.location.href = "/";
       }
     } catch (error) {
       console.error("Sign out error:", error);
-      // Even if Supabase fails, clear local data
+      // Even if Supabase fails, clear local data and redirect
       setProfile(null);
+      setLoading(false);
       clearAuthData();
-      throw error;
+
+      if (typeof window !== "undefined") {
+        window.location.href = "/";
+      }
     }
-  }, [supabase]);
+  }, []);
 
   const value = useMemo<AuthContextType>(
     () => ({
       profile,
-      setProfile,
       loading,
       signIn,
       signInWithMagicLink,
       signInWithGoogle,
       signInWithTwitter,
       signOut,
-      supabase,
     }),
     [
       profile,
@@ -310,7 +355,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle,
       signInWithTwitter,
       signOut,
-      supabase,
     ]
   );
 
