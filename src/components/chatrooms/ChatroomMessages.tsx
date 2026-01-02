@@ -47,6 +47,7 @@ import {
   TrendingUp,
   Award,
   Link2,
+  BellOff,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -70,6 +71,7 @@ import { EmojiPickerComponent } from "./EmojiPicker";
 import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardItem } from "./LeaderboardItem";
+import { Howl } from "howler";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -132,6 +134,103 @@ export function ChatroomMessagesEnhanced({
   } | null>(null);
   const searchParams = useSearchParams();
   const leaderboardRefetchTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [isSoundEnabled, setIsSoundEnabled] = useState(false);
+  const [hasRequestedPermission, setHasRequestedPermission] = useState(false);
+  const [soundInstance, setSoundInstance] = useState<Howl | null>(null);
+  const audioPermissionRef = useRef(false);
+
+  // Load sound and check permission on component mount
+  useEffect(() => {
+    // Initialize Howl sound (you need to have a sound file in your public folder)
+    const sound = new Howl({
+      src: ["/sounds/message-notification.wav"],
+      volume: 0.5,
+      preload: true,
+      onloaderror: (id, error) => {
+        console.error("Failed to load sound:", error);
+      },
+    });
+
+    setSoundInstance(sound);
+
+    // Check if user has previously granted permission
+    const savedSoundPref = localStorage.getItem("chat-sound-enabled");
+    if (savedSoundPref) {
+      setIsSoundEnabled(JSON.parse(savedSoundPref));
+      audioPermissionRef.current = true;
+    }
+
+    return () => {
+      sound.unload();
+    };
+  }, []);
+
+  // Function to request audio permission
+  const requestAudioPermission = async () => {
+    try {
+      // Create a silent audio context to trigger browser permission
+      const AudioContext =
+        window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioContext();
+
+      // Create a silent oscillator
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 0; // Silent
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.001);
+
+      // Resume the audio context (this triggers permission prompt in some browsers)
+      await audioContext.resume();
+
+      audioPermissionRef.current = true;
+      setHasRequestedPermission(true);
+
+      // Schedule the context to close after a short delay
+      setTimeout(() => {
+        audioContext.close();
+      }, 100);
+
+      return true;
+    } catch (error) {
+      console.error("Audio permission error:", error);
+      return false;
+    }
+  };
+
+  // Function to play sound
+  const playMessageSound = () => {
+    if (!soundInstance || !isSoundEnabled) return;
+
+    try {
+      soundInstance.play();
+    } catch (error) {
+      console.error("Error playing sound:", error);
+    }
+  };
+
+  // Function to toggle sound
+  const toggleSound = async () => {
+    if (!isSoundEnabled) {
+      // If enabling sound, request permission first
+      const hasPermission = await requestAudioPermission();
+      if (hasPermission) {
+        setIsSoundEnabled(true);
+        localStorage.setItem("chat-sound-enabled", "true");
+        toast.success("Sound notifications enabled");
+      } else {
+        toast.error("Could not enable sound notifications");
+      }
+    } else {
+      setIsSoundEnabled(false);
+      localStorage.setItem("chat-sound-enabled", "false");
+      toast.info("Sound notifications disabled");
+    }
+  };
 
   // Fetch leaderboards
   const fetchLeaderboards = async () => {
@@ -325,9 +424,31 @@ export function ChatroomMessagesEnhanced({
 
           setMessages((prev) => [...prev, messageWithUser]);
 
-          // Optional: Play a sound or show subtle notification
+          // Check if message is from another user and play sound
           if (messageWithUser.user_id !== profile?.id) {
+            // Show notification
             toast.info(`New message from ${userProfile?.full_name || "User"}`);
+
+            // Play sound if enabled
+            playMessageSound();
+
+            // Optional: Trigger browser notification if user is not focused on tab
+            if (document.hidden && "Notification" in window) {
+              if (Notification.permission === "granted") {
+                new Notification(
+                  `New message from ${userProfile?.full_name || "User"}`,
+                  {
+                    body:
+                      messageWithUser.content.length > 50
+                        ? `${messageWithUser.content.substring(0, 50)}...`
+                        : messageWithUser.content,
+                    icon: userProfile?.avatar_url || "/default-avatar.png",
+                    tag: `message-${messageWithUser.id}`,
+                    renotify: true,
+                  } as any
+                );
+              }
+            }
           }
 
           // Debounce leaderboard updates
@@ -379,7 +500,7 @@ export function ChatroomMessagesEnhanced({
       }
       supabase.removeChannel(channel);
     };
-  }, [chatroom.id, profile?.id]);
+  }, [chatroom.id, profile?.id, isSoundEnabled, soundInstance]);
 
   // Presence management - WORKING VERSION
   useEffect(() => {
@@ -941,12 +1062,24 @@ export function ChatroomMessagesEnhanced({
                 <Settings className="h-4 w-4 mr-2" />
                 Chat Settings
               </DropdownMenuItem>
-              <DropdownMenuItem>
-                <Bell className="h-4 w-4 mr-2" />
-                Notification Settings
+              <DropdownMenuItem onClick={toggleSound}>
+                {isSoundEnabled ? (
+                  <>
+                    <Bell className="h-4 w-4 mr-2" />
+                    Sound: On
+                  </>
+                ) : (
+                  <>
+                    <BellOff className="h-4 w-4 mr-2" />
+                    Sound: Off
+                  </>
+                )}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive">
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={() => router.push("/")}
+              >
                 <LogOut className="h-4 w-4 mr-2" />
                 Leave Chat
               </DropdownMenuItem>

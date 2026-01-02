@@ -344,7 +344,7 @@ export function ChatroomDiscovery() {
     </div>
   );
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <main className="mx-auto min-h-screen max-w-6xl px-2 sm:px-6 py-12">
         <div className="space-y-8">
