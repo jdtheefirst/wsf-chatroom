@@ -93,12 +93,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [supabase]
   );
 
+  // /lib/context/AuthContext.tsx - Updated useEffect
   useEffect(() => {
     let mounted = true;
+    let initializationAttempts = 0;
+    const MAX_INIT_ATTEMPTS = 3;
 
     const initializeAuth = async () => {
+      if (!mounted) return;
+
       try {
-        // Use getSession on client side (fast, reads from cookies)
+        // Use getSession but with error boundaries
         const {
           data: { session },
           error,
@@ -106,6 +111,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (error) {
           console.error("Error getting session:", error);
+
+          // Critical: If we get auth errors during initialization, clear everything
+          if (error.message?.includes("refresh") || error.status === 401) {
+            console.warn("Auth error during init, clearing auth data");
+            clearAuthData();
+          }
+
           if (mounted) setLoading(false);
           return;
         }
@@ -117,13 +129,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(false);
           }
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error in initializeAuth:", error);
+
+        // Handle token refresh loop errors
+        if (
+          error.message?.includes("refresh") ||
+          error.message?.includes("invalid") ||
+          error.status === 401
+        ) {
+          initializationAttempts++;
+
+          if (initializationAttempts >= MAX_INIT_ATTEMPTS) {
+            console.error(
+              "Too many auth initialization failures, forcing cleanup"
+            );
+            clearAuthData();
+            setProfile(null);
+          }
+        }
+
         if (mounted) setLoading(false);
       }
     };
-
-    initializeAuth();
 
     // Single auth state change listener
     const {
@@ -131,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
 
-      console.log("Auth state change:", event);
+      console.log("Auth state change in context:", event);
 
       switch (event) {
         case "SIGNED_IN":
@@ -145,10 +173,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         case "SIGNED_OUT":
           setProfile(null);
           setLoading(false);
+          // Clear auth data on sign out
+          clearAuthData();
+          break;
+
+        case "TOKEN_REFRESHED":
+          if (!session) {
+            // This is critical - token refresh failed but returned no session
+            console.error("Token refresh failed, session is null");
+            setProfile(null);
+            setLoading(false);
+            clearAuthData();
+          }
           break;
 
         default:
-          // For INITIAL_SESSION or other events
           if (!session) {
             setProfile(null);
             setLoading(false);
@@ -156,6 +195,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           break;
       }
     });
+
+    // Initialize auth
+    initializeAuth();
 
     return () => {
       mounted = false;
