@@ -118,7 +118,6 @@ body {
   }
 }
 
-/* Add these styles */
 @keyframes highlight-pulse {
   0%,
   100% {
@@ -142,4 +141,63 @@ body {
 
 .highlight-pulse {
   animation: highlight-pulse 1s ease-in-out;
+}
+
+@keyframes highlightPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.highlighted-message {
+  border: 2px solid #3b82f6 !important;
+  background-color: rgba(59, 130, 246, 0.1) !important;
+}
+
+/* Smooth transitions for reactions */
+.reaction-button {
+  transition: all 0.2s ease;
+}
+
+.reaction-button:hover {
+  transform: scale(1.1);
+}
+
+/* Reply preview styling */
+.reply-preview {
+  border-left: 3px solid #3b82f6;
+  background: linear-gradient(
+    90deg,
+    rgba(59, 130, 246, 0.1) 0%,
+    transparent 100%
+  );
+}
+
+/* Emoji picker animations */
+.emoji-picker-enter {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.9);
+}
+
+.emoji-picker-enter-active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition: opacity 200ms, transform 200ms;
+}
+
+.emoji-picker-exit {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.emoji-picker-exit-active {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.9);
+  transition: opacity 200ms, transform 200ms;
 }

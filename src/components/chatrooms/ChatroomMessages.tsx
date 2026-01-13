@@ -48,6 +48,8 @@ import {
   Award,
   Link2,
   BellOff,
+  Reply,
+  SmilePlus,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -80,6 +82,9 @@ type Props = {
   initialMessages: MessageRow[];
   highlightedMessageId?: string;
 };
+
+// Common reaction emojis
+const COMMON_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉"];
 
 export function ChatroomMessagesEnhanced({
   chatroom,
@@ -117,6 +122,12 @@ export function ChatroomMessagesEnhanced({
   // Add a state to track if we've already scrolled to the highlighted message
   const [hasScrolledToHighlighted, setHasScrolledToHighlighted] =
     useState(false);
+  // New states for replies and reactions
+  const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
+  const [showReactionsPicker, setShowReactionsPicker] = useState<string | null>(
+    null
+  );
+  const [reactions, setReactions] = useState<Record<string, any[]>>({}); // message_id -> reactions array
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     // Only auto-scroll if there's no highlighted message to jump to
@@ -383,6 +394,7 @@ export function ChatroomMessagesEnhanced({
   };
 
   // Realtime subscription for messages
+  // Enhanced realtime subscription for reactions and replies
   useEffect(() => {
     if (!supabase) return;
 
@@ -417,10 +429,21 @@ export function ChatroomMessagesEnhanced({
             content: newMessage.content,
             language: newMessage.language,
             file_url: newMessage.file_url,
+            reply_to: newMessage.reply_to,
             created_at: newMessage.created_at,
             translated_content: newMessage.translated_content || {},
             user: userProfile || null,
+            reactions_count: newMessage.reactions_count || {},
+            user_reactions: [],
           };
+
+          // Hydrate reply if needed
+          if (newMessage.reply_to) {
+            const repliedMessage = getMessageById(newMessage.reply_to);
+            if (repliedMessage) {
+              messageWithUser.reply_to_message = repliedMessage;
+            }
+          }
 
           setMessages((prev) => [...prev, messageWithUser]);
 
@@ -458,7 +481,7 @@ export function ChatroomMessagesEnhanced({
 
           leaderboardRefetchTimeout.current = setTimeout(() => {
             fetchLeaderboards();
-          }, 2000); // 2 second debounce
+          }, 2000);
         }
       )
       .on(
@@ -469,13 +492,27 @@ export function ChatroomMessagesEnhanced({
           table: "messages",
           filter: `chatroom_id=eq.${chatroom.id}`,
         },
-        (payload) => {
+        async (payload) => {
           console.log("Message updated:", payload);
+          const updatedMessage = payload.new as any;
+
+          // Update message in state
           setMessages((prev) =>
             prev.map((msg) =>
-              msg.id === payload.new.id ? { ...msg, ...payload.new } : msg
+              msg.id === payload.new.id
+                ? {
+                    ...msg,
+                    ...updatedMessage,
+                    reactions_count: updatedMessage.reactions_count || {},
+                  }
+                : msg
             )
           );
+
+          // If reactions count changed, fetch reactions
+          if (updatedMessage.reactions_count) {
+            fetchMessageReactions(updatedMessage.id);
+          }
         }
       )
       .on(
@@ -492,6 +529,118 @@ export function ChatroomMessagesEnhanced({
           );
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_reactions",
+        },
+        async (payload) => {
+          console.log("Reaction change:", payload);
+          const reaction = payload.new as any;
+
+          if (payload.eventType === "INSERT") {
+            // Fetch reaction with user info
+            const { data: reactionWithUser } = await supabase
+              .from("message_reactions")
+              .select(
+                `
+                *,
+                user:users_profile(*)
+              `
+              )
+              .eq("id", reaction.id)
+              .single();
+
+            if (reactionWithUser) {
+              setReactions((prev) => ({
+                ...prev,
+                [reaction.message_id]: [
+                  ...(prev[reaction.message_id] || []),
+                  reactionWithUser,
+                ],
+              }));
+
+              // Update reactions count in message
+              setMessages((prev) =>
+                prev.map((msg) => {
+                  if (msg.id === reaction.message_id) {
+                    const currentCount = msg.reactions_count || {};
+                    const newCount = {
+                      ...currentCount,
+                      [reaction.emoji]: (currentCount[reaction.emoji] || 0) + 1,
+                    };
+
+                    const userReactions = msg.user_reactions || [];
+                    if (
+                      reaction.user_id === profile?.id &&
+                      !userReactions.includes(reaction.emoji)
+                    ) {
+                      userReactions.push(reaction.emoji);
+                    }
+
+                    return {
+                      ...msg,
+                      reactions_count: newCount,
+                      user_reactions: userReactions,
+                    };
+                  }
+                  return msg;
+                })
+              );
+            }
+          } else if (payload.eventType === "DELETE") {
+            const oldReaction = payload.old as any;
+
+            // Remove from reactions state
+            setReactions((prev) => ({
+              ...prev,
+              [oldReaction.message_id]: (
+                prev[oldReaction.message_id] || []
+              ).filter(
+                (r) =>
+                  !(
+                    r.user_id === oldReaction.user_id &&
+                    r.emoji === oldReaction.emoji
+                  )
+              ),
+            }));
+
+            // Update reactions count in message
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id === oldReaction.message_id) {
+                  const currentCount = msg.reactions_count || {};
+                  const newCount = { ...currentCount };
+
+                  if (newCount[oldReaction.emoji]) {
+                    newCount[oldReaction.emoji]--;
+                    if (newCount[oldReaction.emoji] <= 0) {
+                      delete newCount[oldReaction.emoji];
+                    }
+                  }
+
+                  const userReactions = msg.user_reactions || [];
+                  const userReactionIndex = userReactions.indexOf(
+                    oldReaction.emoji
+                  );
+                  if (userReactionIndex > -1) {
+                    userReactions.splice(userReactionIndex, 1);
+                  }
+
+                  return {
+                    ...msg,
+                    reactions_count: newCount,
+                    user_reactions: userReactions,
+                  };
+                }
+                return msg;
+              })
+            );
+          }
+        }
+      )
       .subscribe();
 
     return () => {
@@ -501,6 +650,15 @@ export function ChatroomMessagesEnhanced({
       supabase.removeChannel(channel);
     };
   }, [chatroom.id, profile?.id, isSoundEnabled, soundInstance]);
+
+  // Fetch reactions for existing messages on mount
+  useEffect(() => {
+    if (messages.length > 0 && supabase) {
+      messages.forEach((message) => {
+        fetchMessageReactions(message.id);
+      });
+    }
+  }, [messages.length, supabase]);
 
   // Presence management - WORKING VERSION
   useEffect(() => {
@@ -691,6 +849,193 @@ export function ChatroomMessagesEnhanced({
     }, 0);
   };
 
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  // Function to get a message by ID
+  const getMessageById = (id: string) => {
+    return messages.find((msg) => msg.id === id);
+  };
+
+  // Function to hydrate reply messages
+  const hydrateReplyMessages = async (messages: MessageRow[]) => {
+    const messagesWithReplies = [...messages];
+
+    // Find messages with replies
+    const messagesWithReplyTo = messages.filter((msg) => msg.reply_to);
+
+    for (const message of messagesWithReplyTo) {
+      if (!message.reply_to_message && message.reply_to) {
+        // Fetch the replied message if not already loaded
+        const repliedMessage = getMessageById(message.reply_to);
+        if (repliedMessage) {
+          const index = messagesWithReplies.findIndex(
+            (m) => m.id === message.id
+          );
+          if (index !== -1) {
+            messagesWithReplies[index] = {
+              ...messagesWithReplies[index],
+              reply_to_message: repliedMessage,
+            };
+          }
+        } else {
+          // Fetch from database if not in local state
+          try {
+            const { data, error } = await supabase
+              .from("messages")
+              .select(
+                `
+                *,
+                user:users_profile!messages_user_id_fkey(*)
+              `
+              )
+              .eq("id", message.reply_to)
+              .single();
+
+            if (data && !error) {
+              const index = messagesWithReplies.findIndex(
+                (m) => m.id === message.id
+              );
+              if (index !== -1) {
+                messagesWithReplies[index] = {
+                  ...messagesWithReplies[index],
+                  reply_to_message: data,
+                };
+              }
+            }
+          } catch (error) {
+            console.error("Error fetching reply message:", error);
+          }
+        }
+      }
+    }
+
+    return messagesWithReplies;
+  };
+
+  // Function to fetch reactions for a message
+  const fetchMessageReactions = async (messageId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("message_reactions")
+        .select(
+          `
+          *,
+          user:users_profile(*)
+        `
+        )
+        .eq("message_id", messageId)
+        .order("created_at", { ascending: true });
+
+      if (error) throw error;
+
+      // Update reactions state
+      setReactions((prev) => ({
+        ...prev,
+        [messageId]: data || [],
+      }));
+
+      // Calculate reactions count for the message
+      const reactionsCount: Record<string, number> = {};
+      const userReactions: string[] = [];
+
+      data?.forEach((reaction) => {
+        reactionsCount[reaction.emoji] =
+          (reactionsCount[reaction.emoji] || 0) + 1;
+        if (reaction.user_id === profile?.id) {
+          userReactions.push(reaction.emoji);
+        }
+      });
+
+      // Update message with reactions count and user reactions
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                reactions_count: reactionsCount,
+                user_reactions: userReactions,
+              }
+            : msg
+        )
+      );
+    } catch (error) {
+      console.error("Error fetching reactions:", error);
+    }
+  };
+
+  // Function to add/remove reaction
+  const toggleReaction = async (messageId: string, emoji: string) => {
+    if (!profile?.id) {
+      toast.error("Please sign in to react");
+      return;
+    }
+
+    try {
+      const message = getMessageById(messageId);
+      const hasReacted = message?.user_reactions?.includes(emoji);
+
+      if (hasReacted) {
+        // Remove reaction
+        const { error } = await supabase
+          .from("message_reactions")
+          .delete()
+          .eq("message_id", messageId)
+          .eq("user_id", profile.id)
+          .eq("emoji", emoji);
+
+        if (error) throw error;
+        toast.success("Reaction removed");
+      } else {
+        // Add reaction
+        const { error } = await supabase.from("message_reactions").insert({
+          message_id: messageId,
+          user_id: profile.id,
+          emoji: emoji,
+        });
+
+        if (error) {
+          // If unique constraint violation, just remove it
+          if (error.code === "23505") {
+            await supabase
+              .from("message_reactions")
+              .delete()
+              .eq("message_id", messageId)
+              .eq("user_id", profile.id)
+              .eq("emoji", emoji);
+          } else {
+            throw error;
+          }
+        }
+        toast.success("Reaction added");
+      }
+
+      // Refetch reactions
+      fetchMessageReactions(messageId);
+    } catch (error) {
+      console.error("Error toggling reaction:", error);
+      toast.error("Failed to update reaction");
+    }
+  };
+
+  // Function to handle reply
+  const handleReply = (message: MessageRow) => {
+    setReplyingTo(message);
+    setInput(`@${message.user?.full_name || "User"} `);
+    textareaRef.current?.focus();
+  };
+
+  // Function to cancel reply
+  const cancelReply = () => {
+    setReplyingTo(null);
+    setInput("");
+  };
+
+  // Enhanced sendMessage function with reply support
   const sendMessage = async () => {
     if (!profile) {
       toast.error("Please sign in to send messages.");
@@ -706,9 +1051,11 @@ export function ChatroomMessagesEnhanced({
     setIsUploading(true);
     const text = input.trim();
     const currentFile = file;
+    const replyToId = replyingTo?.id;
 
     setInput("");
     setFile(null);
+    setReplyingTo(null);
 
     try {
       let fileUrl: string | null = null;
@@ -717,7 +1064,6 @@ export function ChatroomMessagesEnhanced({
       if (currentFile && allowFiles) {
         const fileSizeMB = currentFile.size / (1024 * 1024);
         if (fileSizeMB > 10) {
-          // 10MB limit
           throw new Error("File size exceeds 10MB limit");
         }
 
@@ -744,23 +1090,35 @@ export function ChatroomMessagesEnhanced({
         setFileUrls((prev) => ({ ...prev, [filePath]: publicUrl }));
       }
 
-      // Insert message
+      // Insert message with reply
       const { error: insertError } = await supabase.from("messages").insert({
         user_id: profile.id,
         chatroom_id: chatroom.id,
         content: text || "(File attached)",
         language: profile?.language || "en",
         file_url: fileUrl,
+        reply_to: replyToId,
         translated_content: {},
       });
 
       if (insertError) throw insertError;
 
       toast.success("Message sent!");
+
+      // Debounce leaderboard updates
+      if (leaderboardRefetchTimeout.current) {
+        clearTimeout(leaderboardRefetchTimeout.current);
+      }
+      leaderboardRefetchTimeout.current = setTimeout(() => {
+        fetchLeaderboards();
+      }, 2000);
     } catch (err: any) {
       console.error("Send message error:", err);
       toast.error(err.message || "Failed to send message");
       setInput(text); // Restore text if error
+      if (replyingTo) {
+        setReplyingTo(replyingTo);
+      }
     } finally {
       setSending(false);
       setIsUploading(false);
@@ -768,13 +1126,7 @@ export function ChatroomMessagesEnhanced({
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  };
-
+  // Function to handle file selection (FIXED - now used)
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
@@ -792,6 +1144,11 @@ export function ChatroomMessagesEnhanced({
 
     setFile(selectedFile);
     toast.success(`File selected: ${selectedFile.name}`);
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   const copyMessage = async (content: string, messageId: string) => {
@@ -905,6 +1262,223 @@ export function ChatroomMessagesEnhanced({
       </div>
     );
   };
+
+  // Add to the UI: Reply preview component
+  const renderReplyPreview = () => {
+    if (!replyingTo) return null;
+
+    return (
+      <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800/30 flex items-center justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <Reply className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+              Replying to {replyingTo.user?.full_name || "User"}
+            </span>
+          </div>
+          <div className="text-sm text-blue-600 dark:text-blue-400 truncate">
+            {replyingTo.content.length > 100
+              ? `${replyingTo.content.substring(0, 100)}...`
+              : replyingTo.content}
+          </div>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={cancelReply}
+          className="h-7 w-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  };
+
+  // Add to the message render function: Reply indicator
+  const renderReplyIndicator = (message: MessageRow) => {
+    if (!message.reply_to || !message.reply_to_message) return null;
+
+    const repliedMessage = message.reply_to_message;
+
+    return (
+      <div
+        className="mb-2 p-2 rounded-lg bg-muted/50 border-l-2 border-primary cursor-pointer hover:bg-muted transition-colors"
+        onClick={() => {
+          // Scroll to the replied message
+          const repliedElement = document.getElementById(
+            `message-${repliedMessage.id}`
+          );
+          if (repliedElement) {
+            repliedElement.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+            repliedElement.classList.add("highlight-pulse");
+            setTimeout(() => {
+              repliedElement.classList.remove("highlight-pulse");
+            }, 2000);
+          }
+        }}
+      >
+        <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+          <Reply className="h-3 w-3" />
+          <span className="font-medium">
+            Replying to {repliedMessage.user?.full_name || "User"}
+          </span>
+        </div>
+        <div className="text-sm truncate">
+          {repliedMessage.content.length > 50
+            ? `${repliedMessage.content.substring(0, 50)}...`
+            : repliedMessage.content}
+        </div>
+      </div>
+    );
+  };
+
+  // Add to the message render function: Reactions section
+  const renderReactions = (message: MessageRow) => {
+    if (
+      !message.reactions_count ||
+      Object.keys(message.reactions_count).length === 0
+    ) {
+      return null;
+    }
+
+    return (
+      <div className="mt-2 flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
+          {Object.entries(message.reactions_count).map(([emoji, count]) => (
+            <Button
+              key={emoji}
+              variant="outline"
+              size="sm"
+              className={cn(
+                "h-7 px-2 rounded-full text-xs gap-1",
+                message.user_reactions?.includes(emoji)
+                  ? "bg-primary/10 border-primary/30"
+                  : "bg-background"
+              )}
+              onClick={() => toggleReaction(message.id, emoji)}
+            >
+              <span>{emoji}</span>
+              <span>{count}</span>
+            </Button>
+          ))}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 rounded-full"
+          onClick={() =>
+            setShowReactionsPicker(
+              showReactionsPicker === message.id ? null : message.id
+            )
+          }
+        >
+          <SmilePlus className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  };
+
+  // Add reactions picker UI
+  const renderReactionsPicker = (message: MessageRow) => {
+    if (showReactionsPicker !== message.id) return null;
+
+    return (
+      <div className="absolute bottom-full left-0 mb-2 p-2 bg-card border rounded-xl shadow-lg z-50">
+        <div className="flex items-center gap-1">
+          {COMMON_REACTIONS.map((emoji) => (
+            <Button
+              key={emoji}
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 hover:scale-110 transition-transform"
+              onClick={() => {
+                toggleReaction(message.id, emoji);
+                setShowReactionsPicker(null);
+              }}
+            >
+              <span className="text-lg">{emoji}</span>
+            </Button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // Update the message actions dropdown to include Reply option
+  const renderMessageActions = (
+    message: MessageRow,
+    isCurrentUser: boolean
+  ) => (
+    <DropdownMenuContent align="end" className="w-48 rounded-xl">
+      <DropdownMenuItem
+        onClick={() => handleReply(message)}
+        className="cursor-pointer rounded-lg"
+      >
+        <Reply className="h-4 w-4 mr-2" />
+        Reply
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => {
+          router.push(
+            `https://www.worldsamma.org/students/${message.user?.admission_no}`
+          );
+        }}
+        className="cursor-pointer rounded-lg"
+      >
+        <User className="h-4 w-4 mr-2" />
+        View Profile
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        onClick={() => copyMessage(message.content, message.id)}
+        className="cursor-pointer rounded-lg"
+      >
+        {copiedMessageId === message.id ? (
+          <Check className="h-4 w-4 mr-2 text-green-500" />
+        ) : (
+          <Copy className="h-4 w-4 mr-2" />
+        )}
+        Copy Text
+      </DropdownMenuItem>
+      {shareable && (
+        <DropdownMenuItem
+          onClick={() => shareMessage(message.id)}
+          className="cursor-pointer rounded-lg"
+        >
+          <Share2 className="h-4 w-4 mr-2" />
+          Share Message
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuItem
+        onClick={() => translateMessage(message)}
+        className="cursor-pointer rounded-lg"
+      >
+        <Globe className="h-4 w-4 mr-2" />
+        Translate
+      </DropdownMenuItem>
+      {isCurrentUser && (
+        <>
+          <DropdownMenuItem
+            onClick={() => startEdit(message.id, message.content)}
+            className="cursor-pointer rounded-lg"
+          >
+            <Edit2 className="h-4 w-4 mr-2" />
+            Edit Message
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="text-destructive cursor-pointer rounded-lg focus:text-destructive"
+            onClick={() => removeMessage(message.id)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Message
+          </DropdownMenuItem>
+        </>
+      )}
+    </DropdownMenuContent>
+  );
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] bg-background rounded-xl border shadow-sm overflow-hidden">
@@ -1371,6 +1945,9 @@ export function ChatroomMessagesEnhanced({
 
                           {/* Message Content - Full width on all devices */}
                           <div className="flex-1 min-w-0 w-full">
+                            {/* Render reply indicator if message is a reply */}
+                            {renderReplyIndicator(message)}
+
                             {/* Desktop User Info - Hidden on mobile */}
                             <div className="hidden sm:flex items-start justify-between mb-2 w-full">
                               <div className="flex flex-col gap-1 flex-1">
@@ -1404,6 +1981,16 @@ export function ChatroomMessagesEnhanced({
                                       >
                                         {beltInfo.program.split(" ")[0]}
                                       </Badge>
+
+                                      {/* Elite Plus Badge */}
+                                      {eliteLevel && (
+                                        <Badge
+                                          variant="destructive"
+                                          className="text-[10px] py-0 px-1.5 font-normal"
+                                        >
+                                          Elite+ {eliteLevel.name}
+                                        </Badge>
+                                      )}
                                     </>
                                   )}
                                 </div>
@@ -1637,6 +2224,10 @@ export function ChatroomMessagesEnhanced({
                                     </a>
                                   </div>
                                 )}
+
+                              {/* Reactions */}
+                              {renderReactions(message)}
+                              {renderReactionsPicker(message)}
                             </div>
 
                             {/* Mobile Message Actions - Full width row */}
@@ -1793,6 +2384,9 @@ export function ChatroomMessagesEnhanced({
             {/* Fixed Message Input Area */}
             <div className="flex-shrink-0 border-t bg-card/50 backdrop-blur-sm p-4">
               <div className="max-w-4xl mx-auto">
+                {/* Reply Preview */}
+                {renderReplyPreview()}
+
                 {file && (
                   <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-primary/5 to-primary/10 border border-primary/20 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -1820,7 +2414,11 @@ export function ChatroomMessagesEnhanced({
                     <div className="relative">
                       <Textarea
                         ref={textareaRef}
-                        placeholder="Type message..."
+                        placeholder={
+                          replyingTo
+                            ? `Replying to ${replyingTo.user?.full_name}...`
+                            : "Type message..."
+                        }
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={handleKeyPress}
@@ -1831,6 +2429,13 @@ export function ChatroomMessagesEnhanced({
                         <EmojiPickerComponent
                           onEmojiSelect={handleEmojiSelect}
                           disabled={sending}
+                        />
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleFileSelect}
+                          className="hidden"
+                          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
                         />
                         <Button
                           variant="ghost"

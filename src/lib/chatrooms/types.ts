@@ -22,6 +22,20 @@ export type EligibilityStatus =
   | { state: "eligible" }
   | { state: "ineligible"; reason: string };
 
+export type UserProfile = {
+  id: string;
+  full_name: string | null;
+  admission_no: string | null;
+  email?: string | null;
+  avatar_url: string | null;
+  belt_level?: number;
+  role?: string;
+  elite_plus?: boolean;
+  overall_performance?: string | null;
+  completed_all_programs?: boolean;
+  elite_plus_level?: number | null;
+};
+
 export type MessageRow = {
   user_id: string;
   id: string;
@@ -30,19 +44,21 @@ export type MessageRow = {
   translated_content?: Record<string, string> | null;
   file_url: string | null;
   created_at: string;
-  user: {
-    id: string;
-    full_name: string | null;
-    admission_no: string | null;
-    email?: string | null;
-    avatar_url: string | null;
-    belt_level?: number;
-    role?: string;
-    elite_plus?: boolean;
-    overall_performance?: string | null;
-    completed_all_programs?: boolean;
-    elite_plus_level?: number | null;
-  } | null;
+  user: UserProfile | null;
+  reply_to?: string | null;
+  reply_to_message?: MessageRow | null; // For hydrated replies
+  reactions_count?: Record<string, number>; // { "👍": 3, "❤️": 1 }
+  user_reactions?: string[]; // ["👍", "❤️"] - reactions by current user
+};
+
+// Add Reaction type
+export type Reaction = {
+  id: string;
+  message_id: string;
+  user_id: string;
+  emoji: string;
+  created_at: string;
+  user?: UserProfile | null;
 };
 
 export type ChatroomRecord = {
