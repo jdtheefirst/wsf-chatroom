@@ -201,3 +201,14 @@ body {
   transform: translateY(-10px) scale(0.9);
   transition: opacity 200ms, transform 200ms;
 }
+
+.reactions-picker-container {
+  position: relative;
+}
+
+.reactions-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 50;
+}

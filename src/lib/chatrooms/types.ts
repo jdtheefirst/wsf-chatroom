@@ -44,7 +44,7 @@ export type MessageRow = {
   translated_content?: Record<string, string> | null;
   file_url: string | null;
   created_at: string;
-  user: UserProfile | null;
+  user_profile: UserProfile | null;
   reply_to?: string | null;
   reply_to_message?: MessageRow | null; // For hydrated replies
   reactions_count?: Record<string, number>; // { "👍": 3, "❤️": 1 }

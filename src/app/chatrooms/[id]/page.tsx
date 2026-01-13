@@ -16,15 +16,67 @@ export const revalidate = 3600; // 1 hour in seconds
 const getChatroomData = cache(async (id: string) => {
   const supabase = await createClient();
 
-  // Fetch all data in parallel
-  const [
-    { data: userData },
-    { data: chatroom, error: chatroomError },
-    { data: messages },
-  ] = await Promise.all([
-    supabase.auth.getUser(),
-    supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
-    supabase
+  // Fetch chatroom and messages in parallel
+  const [{ data: userData }, { data: chatroom, error: chatroomError }] =
+    await Promise.all([
+      supabase.auth.getUser(),
+      supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
+    ]);
+
+  // Fetch messages with user profiles
+  const { data: messages } = await supabase
+    .from("messages")
+    .select(
+      `
+      id,
+      content,
+      language,
+      file_url,
+      created_at,
+      user_id,
+      reply_to,
+      reactions_count,
+      user_profile:users_profile!messages_user_id_fkey (
+        id,
+        full_name,
+        admission_no,
+        avatar_url,
+        belt_level,
+        country_code,
+        elite_plus,
+        overall_performance,
+        completed_all_programs,
+        elite_plus_level
+      )
+    `
+    )
+    .eq("chatroom_id", id)
+    .order("created_at", { ascending: false }) // Get newest first
+    .limit(100); // Increase to 100
+
+  if (!messages || messages.length === 0) {
+    return {
+      userData,
+      chatroom,
+      chatroomError,
+      messages: [] as MessageRow[],
+      supabase,
+    };
+  }
+
+  // Get all unique reply IDs
+  const replyIds = [
+    ...new Set(
+      messages
+        .filter((msg: any) => msg.reply_to)
+        .map((msg: any) => msg.reply_to)
+    ),
+  ];
+
+  // Fetch replied messages if any
+  let repliedMessages: any[] = [];
+  if (replyIds.length > 0) {
+    const { data: repliedData } = await supabase
       .from("messages")
       .select(
         `
@@ -34,7 +86,7 @@ const getChatroomData = cache(async (id: string) => {
         file_url,
         created_at,
         user_id,
-        user: users_profile!messages_user_id_fkey (
+        user_profile:users_profile!messages_user_id_fkey (
           id,
           full_name,
           admission_no,
@@ -48,16 +100,33 @@ const getChatroomData = cache(async (id: string) => {
         )
       `
       )
-      .eq("chatroom_id", id)
-      .order("created_at", { ascending: true })
-      .limit(50),
-  ]);
+      .in("id", replyIds);
+
+    repliedMessages = repliedData || [];
+  }
+
+  // Create a map for quick reply lookup
+  const repliedMessagesMap = new Map();
+  repliedMessages.forEach((msg: any) => {
+    repliedMessagesMap.set(msg.id, msg);
+  });
+
+  // Hydrate messages with replies and ensure reactions_count is an object
+  const hydratedMessages = messages.map((msg: any) => ({
+    ...msg,
+    reply_to_message: msg.reply_to
+      ? repliedMessagesMap.get(msg.reply_to)
+      : null,
+    reactions_count: msg.reactions_count || {},
+    user_reactions: [], // Will be populated client-side
+    translated_content: {}, // Initialize empty
+  }));
 
   return {
     userData,
     chatroom,
     chatroomError,
-    messages: messages as unknown as MessageRow[],
+    messages: hydratedMessages.reverse() as MessageRow[], // Reverse to show oldest first
     supabase,
   };
 });

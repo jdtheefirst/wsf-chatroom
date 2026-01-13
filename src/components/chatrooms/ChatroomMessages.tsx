@@ -127,7 +127,6 @@ export function ChatroomMessagesEnhanced({
   const [showReactionsPicker, setShowReactionsPicker] = useState<string | null>(
     null
   );
-  const [reactions, setReactions] = useState<Record<string, any[]>>({}); // message_id -> reactions array
   // Auto-scroll to bottom
   const scrollToBottom = () => {
     // Only auto-scroll if there's no highlighted message to jump to
@@ -146,7 +145,6 @@ export function ChatroomMessagesEnhanced({
   const searchParams = useSearchParams();
   const leaderboardRefetchTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isSoundEnabled, setIsSoundEnabled] = useState(false);
-  const [hasRequestedPermission, setHasRequestedPermission] = useState(false);
   const [soundInstance, setSoundInstance] = useState<Howl | null>(null);
   const audioPermissionRef = useRef(false);
 
@@ -199,7 +197,6 @@ export function ChatroomMessagesEnhanced({
       await audioContext.resume();
 
       audioPermissionRef.current = true;
-      setHasRequestedPermission(true);
 
       // Schedule the context to close after a short delay
       setTimeout(() => {
@@ -372,7 +369,7 @@ export function ChatroomMessagesEnhanced({
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `WSF Chat: ${message.user?.full_name || "User"}`,
+          title: `WSF Chat: ${message.user_profile?.full_name || "User"}`,
           text:
             message.content.length > 100
               ? `${message.content.substring(0, 100)}...`
@@ -432,16 +429,30 @@ export function ChatroomMessagesEnhanced({
             reply_to: newMessage.reply_to,
             created_at: newMessage.created_at,
             translated_content: newMessage.translated_content || {},
-            user: userProfile || null,
+            user_profile: userProfile || null,
             reactions_count: newMessage.reactions_count || {},
             user_reactions: [],
           };
 
-          // Hydrate reply if needed
+          // If this is a reply, fetch the replied message
           if (newMessage.reply_to) {
-            const repliedMessage = getMessageById(newMessage.reply_to);
+            const { data: repliedMessage } = await supabase
+              .from("messages")
+              .select(
+                `
+          *,
+          user_profile:users_profile!messages_user_id_fkey (
+            id, full_name, admission_no, avatar_url, belt_level, 
+            country_code, elite_plus, overall_performance, 
+            completed_all_programs, elite_plus_level
+          )
+        `
+              )
+              .eq("id", newMessage.reply_to)
+              .single();
+
             if (repliedMessage) {
-              messageWithUser.reply_to_message = repliedMessage;
+              messageWithUser.reply_to_message = repliedMessage as MessageRow;
             }
           }
 
@@ -511,7 +522,7 @@ export function ChatroomMessagesEnhanced({
 
           // If reactions count changed, fetch reactions
           if (updatedMessage.reactions_count) {
-            fetchMessageReactions(updatedMessage.id);
+            fetchAllMessageReactionsOptimized();
           }
         }
       )
@@ -541,71 +552,35 @@ export function ChatroomMessagesEnhanced({
           const reaction = payload.new as any;
 
           if (payload.eventType === "INSERT") {
-            // Fetch reaction with user info
-            const { data: reactionWithUser } = await supabase
-              .from("message_reactions")
-              .select(
-                `
-                *,
-                user:users_profile(*)
-              `
-              )
-              .eq("id", reaction.id)
-              .single();
+            // Update reactions count in message
+            setMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id === reaction.message_id) {
+                  const currentCount = msg.reactions_count || {};
+                  const newCount = {
+                    ...currentCount,
+                    [reaction.emoji]: (currentCount[reaction.emoji] || 0) + 1,
+                  };
 
-            if (reactionWithUser) {
-              setReactions((prev) => ({
-                ...prev,
-                [reaction.message_id]: [
-                  ...(prev[reaction.message_id] || []),
-                  reactionWithUser,
-                ],
-              }));
-
-              // Update reactions count in message
-              setMessages((prev) =>
-                prev.map((msg) => {
-                  if (msg.id === reaction.message_id) {
-                    const currentCount = msg.reactions_count || {};
-                    const newCount = {
-                      ...currentCount,
-                      [reaction.emoji]: (currentCount[reaction.emoji] || 0) + 1,
-                    };
-
-                    const userReactions = msg.user_reactions || [];
-                    if (
-                      reaction.user_id === profile?.id &&
-                      !userReactions.includes(reaction.emoji)
-                    ) {
-                      userReactions.push(reaction.emoji);
-                    }
-
-                    return {
-                      ...msg,
-                      reactions_count: newCount,
-                      user_reactions: userReactions,
-                    };
+                  const userReactions = msg.user_reactions || [];
+                  if (
+                    reaction.user_id === profile?.id &&
+                    !userReactions.includes(reaction.emoji)
+                  ) {
+                    userReactions.push(reaction.emoji);
                   }
-                  return msg;
-                })
-              );
-            }
+
+                  return {
+                    ...msg,
+                    reactions_count: newCount,
+                    user_reactions: userReactions,
+                  };
+                }
+                return msg;
+              })
+            );
           } else if (payload.eventType === "DELETE") {
             const oldReaction = payload.old as any;
-
-            // Remove from reactions state
-            setReactions((prev) => ({
-              ...prev,
-              [oldReaction.message_id]: (
-                prev[oldReaction.message_id] || []
-              ).filter(
-                (r) =>
-                  !(
-                    r.user_id === oldReaction.user_id &&
-                    r.emoji === oldReaction.emoji
-                  )
-              ),
-            }));
 
             // Update reactions count in message
             setMessages((prev) =>
@@ -621,13 +596,9 @@ export function ChatroomMessagesEnhanced({
                     }
                   }
 
-                  const userReactions = msg.user_reactions || [];
-                  const userReactionIndex = userReactions.indexOf(
-                    oldReaction.emoji
+                  const userReactions = (msg.user_reactions || []).filter(
+                    (emoji: string) => emoji !== oldReaction.emoji
                   );
-                  if (userReactionIndex > -1) {
-                    userReactions.splice(userReactionIndex, 1);
-                  }
 
                   return {
                     ...msg,
@@ -649,16 +620,35 @@ export function ChatroomMessagesEnhanced({
       }
       supabase.removeChannel(channel);
     };
-  }, [chatroom.id, profile?.id, isSoundEnabled, soundInstance]);
+  }, [chatroom.id, profile?.id, isSoundEnabled, soundInstance, messages]);
 
   // Fetch reactions for existing messages on mount
   useEffect(() => {
-    if (messages.length > 0 && supabase) {
+    if (messages.length > 0) {
       messages.forEach((message) => {
-        fetchMessageReactions(message.id);
+        fetchAllMessageReactionsOptimized();
       });
     }
-  }, [messages.length, supabase]);
+  }, [messages.length, profile?.id]);
+
+  useEffect(() => {
+    const hydrateMessages = async () => {
+      // Check if any messages need hydration
+      const needsHydration = messages.some(
+        (msg) => msg.reply_to && !msg.reply_to_message
+      );
+
+      if (needsHydration) {
+        const hydratedMessages = await hydrateReplyMessages(messages);
+        // Only update if something changed
+        if (JSON.stringify(hydratedMessages) !== JSON.stringify(messages)) {
+          setMessages(hydratedMessages);
+        }
+      }
+    };
+
+    hydrateMessages();
+  }, [messages]);
 
   // Presence management - WORKING VERSION
   useEffect(() => {
@@ -853,121 +843,139 @@ export function ChatroomMessagesEnhanced({
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    } else if (e.key === "Escape" && replyingTo) {
+      cancelReply();
     }
   };
 
-  // Function to get a message by ID
-  const getMessageById = (id: string) => {
-    return messages.find((msg) => msg.id === id);
-  };
+  // Function to hydrate reply messages - IMPROVED VERSION
+  const hydrateReplyMessages = async (messagesToHydrate: MessageRow[]) => {
+    // Find messages that need hydration
+    const messagesNeedingHydration = messagesToHydrate.filter(
+      (msg) => msg.reply_to && !msg.reply_to_message
+    );
 
-  // Function to hydrate reply messages
-  const hydrateReplyMessages = async (messages: MessageRow[]) => {
-    const messagesWithReplies = [...messages];
-
-    // Find messages with replies
-    const messagesWithReplyTo = messages.filter((msg) => msg.reply_to);
-
-    for (const message of messagesWithReplyTo) {
-      if (!message.reply_to_message && message.reply_to) {
-        // Fetch the replied message if not already loaded
-        const repliedMessage = getMessageById(message.reply_to);
-        if (repliedMessage) {
-          const index = messagesWithReplies.findIndex(
-            (m) => m.id === message.id
-          );
-          if (index !== -1) {
-            messagesWithReplies[index] = {
-              ...messagesWithReplies[index],
-              reply_to_message: repliedMessage,
-            };
-          }
-        } else {
-          // Fetch from database if not in local state
-          try {
-            const { data, error } = await supabase
-              .from("messages")
-              .select(
-                `
-                *,
-                user:users_profile!messages_user_id_fkey(*)
-              `
-              )
-              .eq("id", message.reply_to)
-              .single();
-
-            if (data && !error) {
-              const index = messagesWithReplies.findIndex(
-                (m) => m.id === message.id
-              );
-              if (index !== -1) {
-                messagesWithReplies[index] = {
-                  ...messagesWithReplies[index],
-                  reply_to_message: data,
-                };
-              }
-            }
-          } catch (error) {
-            console.error("Error fetching reply message:", error);
-          }
-        }
-      }
+    if (messagesNeedingHydration.length === 0) {
+      return messagesToHydrate;
     }
 
-    return messagesWithReplies;
-  };
-
-  // Function to fetch reactions for a message
-  const fetchMessageReactions = async (messageId: string) => {
     try {
-      const { data, error } = await supabase
-        .from("message_reactions")
+      // Get all unique reply IDs
+      const replyIds = [
+        ...new Set(messagesNeedingHydration.map((msg) => msg.reply_to)),
+      ];
+
+      // Fetch all replied messages in one query
+      const { data: repliedMessages, error } = await supabase
+        .from("messages")
         .select(
           `
-          *,
-          user:users_profile(*)
-        `
+        *,
+        user_profile:users_profile!messages_user_id_fkey (
+          id, full_name, admission_no, avatar_url, belt_level, 
+          country_code, elite_plus, overall_performance, 
+          completed_all_programs, elite_plus_level
         )
-        .eq("message_id", messageId)
-        .order("created_at", { ascending: true });
+      `
+        )
+        .in("id", replyIds);
 
       if (error) throw error;
 
-      // Update reactions state
-      setReactions((prev) => ({
-        ...prev,
-        [messageId]: data || [],
-      }));
+      // Create a map for quick lookup
+      const repliedMessagesMap = new Map();
+      repliedMessages?.forEach((msg) => {
+        repliedMessagesMap.set(msg.id, msg);
+      });
 
-      // Calculate reactions count for the message
-      const reactionsCount: Record<string, number> = {};
-      const userReactions: string[] = [];
+      // Hydrate the messages
+      return messagesToHydrate.map((msg) => {
+        if (msg.reply_to && !msg.reply_to_message) {
+          const repliedMessage = repliedMessagesMap.get(msg.reply_to);
+          if (repliedMessage) {
+            return {
+              ...msg,
+              reply_to_message: repliedMessage as MessageRow,
+            };
+          }
+        }
+        return msg;
+      });
+    } catch (error) {
+      console.error("Error hydrating reply messages:", error);
+      return messagesToHydrate;
+    }
+  };
 
-      data?.forEach((reaction) => {
-        reactionsCount[reaction.emoji] =
-          (reactionsCount[reaction.emoji] || 0) + 1;
-        if (reaction.user_id === profile?.id) {
-          userReactions.push(reaction.emoji);
+  // Function to fetch reactions for a message
+  // Final optimized version
+  const fetchAllMessageReactionsOptimized = async () => {
+    if (!supabase || messages.length === 0) return;
+
+    try {
+      const messageIds = messages.map((msg) => msg.id);
+
+      // Single query for all reactions
+      const { data, error } = await supabase
+        .from("message_reactions")
+        .select("message_id, emoji, user_id")
+        .in("message_id", messageIds);
+
+      if (error) throw error;
+
+      // Efficient processing with Maps
+      const reactionsCountMap = new Map<string, Map<string, number>>(); // message_id -> Map<emoji, count>
+      const userReactionsMap = new Map<string, Set<string>>(); // message_id -> Set<emoji> for current user
+
+      data?.forEach(({ message_id, emoji, user_id }) => {
+        // Initialize maps if needed
+        if (!reactionsCountMap.has(message_id)) {
+          reactionsCountMap.set(message_id, new Map());
+        }
+        if (!userReactionsMap.has(message_id)) {
+          userReactionsMap.set(message_id, new Set());
+        }
+
+        // Update counts
+        const emojiMap = reactionsCountMap.get(message_id)!;
+        emojiMap.set(emoji, (emojiMap.get(emoji) || 0) + 1);
+
+        // Update user reactions
+        if (user_id === profile?.id) {
+          userReactionsMap.get(message_id)!.add(emoji);
         }
       });
 
-      // Update message with reactions count and user reactions
+      // Update messages in a single pass
       setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId
-            ? {
-                ...msg,
-                reactions_count: reactionsCount,
-                user_reactions: userReactions,
-              }
-            : msg
-        )
+        prev.map((msg) => {
+          const messageId = msg.id;
+          const emojiMap = reactionsCountMap.get(messageId);
+          const userReactionSet = userReactionsMap.get(messageId);
+
+          if (!emojiMap && !userReactionSet) return msg;
+
+          // Convert Map to object for reactions_count
+          const reactionsCount: Record<string, number> = {};
+          if (emojiMap) {
+            emojiMap.forEach((count, emoji) => {
+              reactionsCount[emoji] = count;
+            });
+          }
+
+          return {
+            ...msg,
+            reactions_count: reactionsCount,
+            user_reactions: userReactionSet ? Array.from(userReactionSet) : [],
+          };
+        })
       );
     } catch (error) {
       console.error("Error fetching reactions:", error);
     }
   };
 
+  // Function to add/remove reaction
   // Function to add/remove reaction
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!profile?.id) {
@@ -976,7 +984,7 @@ export function ChatroomMessagesEnhanced({
     }
 
     try {
-      const message = getMessageById(messageId);
+      const message = messages.find((m) => m.id === messageId);
       const hasReacted = message?.user_reactions?.includes(emoji);
 
       if (hasReacted) {
@@ -990,6 +998,34 @@ export function ChatroomMessagesEnhanced({
 
         if (error) throw error;
         toast.success("Reaction removed");
+
+        // Update UI immediately for better UX
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id === messageId) {
+              const currentCount = msg.reactions_count || {};
+              const newCount = { ...currentCount };
+
+              if (newCount[emoji]) {
+                newCount[emoji]--;
+                if (newCount[emoji] <= 0) {
+                  delete newCount[emoji];
+                }
+              }
+
+              const userReactions = (msg.user_reactions || []).filter(
+                (e) => e !== emoji
+              );
+
+              return {
+                ...msg,
+                reactions_count: newCount,
+                user_reactions: userReactions,
+              };
+            }
+            return msg;
+          })
+        );
       } else {
         // Add reaction
         const { error } = await supabase.from("message_reactions").insert({
@@ -999,7 +1035,7 @@ export function ChatroomMessagesEnhanced({
         });
 
         if (error) {
-          // If unique constraint violation, just remove it
+          // If unique constraint violation, remove it
           if (error.code === "23505") {
             await supabase
               .from("message_reactions")
@@ -1011,28 +1047,68 @@ export function ChatroomMessagesEnhanced({
             throw error;
           }
         }
+
         toast.success("Reaction added");
+
+        // Update UI immediately for better UX
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id === messageId) {
+              const currentCount = msg.reactions_count || {};
+              const newCount = {
+                ...currentCount,
+                [emoji]: (currentCount[emoji] || 0) + 1,
+              };
+
+              const userReactions = [...(msg.user_reactions || []), emoji];
+
+              return {
+                ...msg,
+                reactions_count: newCount,
+                user_reactions: userReactions,
+              };
+            }
+            return msg;
+          })
+        );
       }
 
-      // Refetch reactions
-      fetchMessageReactions(messageId);
+      fetchAllMessageReactionsOptimized();
     } catch (error) {
       console.error("Error toggling reaction:", error);
       toast.error("Failed to update reaction");
     }
   };
-
   // Function to handle reply
+  // Function to handle reply - IMPROVED
   const handleReply = (message: MessageRow) => {
     setReplyingTo(message);
-    setInput(`@${message.user?.full_name || "User"} `);
-    textareaRef.current?.focus();
+
+    // Store the username separately
+    const username = message.user_profile?.full_name || "User";
+    setInput(`@${username} `);
+
+    // Focus the textarea
+    setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(
+        username.length + 2, // Position after "@username "
+        username.length + 2
+      );
+      textareaRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 50);
   };
 
   // Function to cancel reply
   const cancelReply = () => {
+    // Clear the reply but keep the @username if user has typed after it
+    if (
+      replyingTo &&
+      input.startsWith(`@${replyingTo.user_profile?.full_name || "User"} `)
+    ) {
+      setInput(`@${replyingTo.user_profile?.full_name || "User"} `);
+    }
     setReplyingTo(null);
-    setInput("");
   };
 
   // Enhanced sendMessage function with reply support
@@ -1264,6 +1340,7 @@ export function ChatroomMessagesEnhanced({
   };
 
   // Add to the UI: Reply preview component
+  // Add to the UI: Reply preview component
   const renderReplyPreview = () => {
     if (!replyingTo) return null;
 
@@ -1273,7 +1350,7 @@ export function ChatroomMessagesEnhanced({
           <div className="flex items-center gap-2 mb-1">
             <Reply className="h-4 w-4 text-blue-600 dark:text-blue-400" />
             <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
-              Replying to {replyingTo.user?.full_name || "User"}
+              Replying to {replyingTo.user_profile?.full_name || "User"}
             </span>
           </div>
           <div className="text-sm text-blue-600 dark:text-blue-400 truncate">
@@ -1285,7 +1362,19 @@ export function ChatroomMessagesEnhanced({
         <Button
           variant="ghost"
           size="icon"
-          onClick={cancelReply}
+          onClick={() => {
+            // When cancelling reply, keep the @username in input if user typed after it
+            const currentInput = input;
+            const username = replyingTo.user_profile?.full_name || "User";
+            const replyPrefix = `@${username} `;
+
+            if (currentInput.startsWith(replyPrefix)) {
+              setInput(replyPrefix); // Keep only the @username
+            } else {
+              setInput(""); // Clear completely
+            }
+            setReplyingTo(null);
+          }}
           className="h-7 w-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30"
         >
           <X className="h-4 w-4" />
@@ -1323,7 +1412,7 @@ export function ChatroomMessagesEnhanced({
         <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
           <Reply className="h-3 w-3" />
           <span className="font-medium">
-            Replying to {repliedMessage.user?.full_name || "User"}
+            Replying to {repliedMessage.user_profile?.full_name || "User"}
           </span>
         </div>
         <div className="text-sm truncate">
@@ -1423,7 +1512,7 @@ export function ChatroomMessagesEnhanced({
       <DropdownMenuItem
         onClick={() => {
           router.push(
-            `https://www.worldsamma.org/students/${message.user?.admission_no}`
+            `https://www.worldsamma.org/students/${message.user_profile?.admission_no}`
           );
         }}
         className="cursor-pointer rounded-lg"
@@ -1762,31 +1851,34 @@ export function ChatroomMessagesEnhanced({
                       const isHighlighted = message.id === highlightedMessageId;
 
                       const beltInfo =
-                        message.user?.belt_level !== undefined
-                          ? getBeltInfo(message.user.belt_level)
+                        message.user_profile?.belt_level !== undefined
+                          ? getBeltInfo(message.user_profile.belt_level)
                           : null;
 
-                      const eliteLevel = message.user?.elite_plus
+                      const eliteLevel = message.user_profile?.elite_plus
                         ? getElitePlusLevelInfo(
-                            message.user.elite_plus_level || 0
+                            message.user_profile.elite_plus_level || 0
                           )
                         : null;
 
                       const nextBelt =
-                        message.user?.belt_level !== undefined
-                          ? getNextBelt(message.user.belt_level)
+                        message.user_profile?.belt_level !== undefined
+                          ? getNextBelt(message.user_profile.belt_level)
                           : null;
                       const progressPercentage =
-                        message.user?.belt_level !== undefined
-                          ? getProgressPercentage(message.user.belt_level)
+                        message.user_profile?.belt_level !== undefined
+                          ? getProgressPercentage(
+                              message.user_profile.belt_level
+                            )
                           : 0;
 
                       const expertiseLevel = getCurrentProgram(
-                        message.user?.belt_level || 0
+                        message.user_profile?.belt_level || 0
                       );
 
                       const isMaxLevel =
-                        message.user?.belt_level === beltOptions.length - 1;
+                        message.user_profile?.belt_level ===
+                        beltOptions.length - 1;
 
                       const isCurrentUser = message.user_id === profile?.id;
 
@@ -1857,12 +1949,12 @@ export function ChatroomMessagesEnhanced({
                                 {/* Avatar */}
                                 <Avatar className="h-10 w-10 sm:h-12 sm:w-12 rounded-full border-2 border-background shadow-sm relative z-10">
                                   <AvatarImage
-                                    src={message.user?.avatar_url || ""}
+                                    src={message.user_profile?.avatar_url || ""}
                                     className="rounded-full"
                                   />
                                   <AvatarFallback className="bg-gradient-to-br from-primary/20 to-primary/10 text-primary font-semibold rounded-xl text-xs">
                                     {getInitials(
-                                      message.user?.full_name ?? null
+                                      message.user_profile?.full_name ?? null
                                     )}
                                   </AvatarFallback>
                                 </Avatar>
@@ -1883,7 +1975,7 @@ export function ChatroomMessagesEnhanced({
 
                               {/* Online Status Indicator */}
                               {onlineUsers.find(
-                                (user) => user.id === message.user?.id
+                                (user) => user.id === message.user_profile?.id
                               ) && (
                                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-background"></div>
                               )}
@@ -1896,7 +1988,7 @@ export function ChatroomMessagesEnhanced({
                                   <span className="font-semibold text-sm truncate">
                                     {isCurrentUser
                                       ? "You"
-                                      : message.user?.full_name ||
+                                      : message.user_profile?.full_name ||
                                         "Anonymous User"}
                                   </span>
                                   <span className="text-xs text-muted-foreground whitespace-nowrap">
@@ -1956,7 +2048,7 @@ export function ChatroomMessagesEnhanced({
                                   <span className="font-semibold text-sm">
                                     {isCurrentUser
                                       ? "You"
-                                      : message.user?.full_name ||
+                                      : message.user_profile?.full_name ||
                                         "Anonymous User"}
                                   </span>
 
@@ -2071,89 +2163,15 @@ export function ChatroomMessagesEnhanced({
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-7 w-7 rounded-lg"
+                                        className="h-8 w-8 rounded-lg"
                                       >
                                         <MoreVertical className="h-4 w-4" />
                                       </Button>
                                     </DropdownMenuTrigger>
-                                    <DropdownMenuContent
-                                      align="end"
-                                      className="w-48 rounded-xl"
-                                    >
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          router.push(
-                                            `https://www.worldsamma.org/students/${message.user?.admission_no}`
-                                          );
-                                        }}
-                                        className="cursor-pointer rounded-lg"
-                                      >
-                                        <User className="h-4 w-4 mr-2" />
-                                        View Profile
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem
-                                        onClick={() =>
-                                          copyMessage(
-                                            message.content,
-                                            message.id
-                                          )
-                                        }
-                                        className="cursor-pointer rounded-lg"
-                                      >
-                                        {copiedMessageId === message.id ? (
-                                          <Check className="h-4 w-4 mr-2 text-green-500" />
-                                        ) : (
-                                          <Copy className="h-4 w-4 mr-2" />
-                                        )}
-                                        Copy Text
-                                      </DropdownMenuItem>
-                                      {shareable && (
-                                        <DropdownMenuItem
-                                          onClick={() =>
-                                            shareMessage(message.id)
-                                          }
-                                          className="cursor-pointer rounded-lg"
-                                        >
-                                          <Share2 className="h-4 w-4 mr-2" />
-                                          Share Message
-                                        </DropdownMenuItem>
-                                      )}
-                                      <DropdownMenuItem
-                                        onClick={() =>
-                                          translateMessage(message)
-                                        }
-                                        className="cursor-pointer rounded-lg"
-                                      >
-                                        <Globe className="h-4 w-4 mr-2" />
-                                        Translate
-                                      </DropdownMenuItem>
-                                      {message.user_id === profile?.id && (
-                                        <>
-                                          <DropdownMenuItem
-                                            onClick={() =>
-                                              startEdit(
-                                                message.id,
-                                                message.content
-                                              )
-                                            }
-                                            className="cursor-pointer rounded-lg"
-                                          >
-                                            <Edit2 className="h-4 w-4 mr-2" />
-                                            Edit Message
-                                          </DropdownMenuItem>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem
-                                            className="text-destructive cursor-pointer rounded-lg focus:text-destructive"
-                                            onClick={() =>
-                                              removeMessage(message.id)
-                                            }
-                                          >
-                                            <Trash2 className="h-4 w-4 mr-2" />
-                                            Delete Message
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
+                                    {renderMessageActions(
+                                      message,
+                                      isCurrentUser
+                                    )}
                                   </DropdownMenu>
                                 </div>
                               </div>
@@ -2301,74 +2319,7 @@ export function ChatroomMessagesEnhanced({
                                     <MoreVertical className="h-4 w-4" />
                                   </Button>
                                 </DropdownMenuTrigger>
-                                <DropdownMenuContent
-                                  align="end"
-                                  className="w-48 rounded-xl"
-                                >
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      router.push(
-                                        `https://www.worldsamma.org/students/${message.user?.admission_no}`
-                                      );
-                                    }}
-                                    className="cursor-pointer rounded-lg"
-                                  >
-                                    <User className="h-4 w-4 mr-2" />
-                                    View Profile
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() =>
-                                      copyMessage(message.content, message.id)
-                                    }
-                                    className="cursor-pointer rounded-lg"
-                                  >
-                                    {copiedMessageId === message.id ? (
-                                      <Check className="h-4 w-4 mr-2 text-green-500" />
-                                    ) : (
-                                      <Copy className="h-4 w-4 mr-2" />
-                                    )}
-                                    Copy Text
-                                  </DropdownMenuItem>
-                                  {shareable && (
-                                    <DropdownMenuItem
-                                      onClick={() => shareMessage(message.id)}
-                                      className="cursor-pointer rounded-lg"
-                                    >
-                                      <Share2 className="h-4 w-4 mr-2" />
-                                      Share Message
-                                    </DropdownMenuItem>
-                                  )}
-                                  <DropdownMenuItem
-                                    onClick={() => translateMessage(message)}
-                                    className="cursor-pointer rounded-lg"
-                                  >
-                                    <Globe className="h-4 w-4 mr-2" />
-                                    Translate
-                                  </DropdownMenuItem>
-                                  {message.user_id === profile?.id && (
-                                    <>
-                                      <DropdownMenuItem
-                                        onClick={() =>
-                                          startEdit(message.id, message.content)
-                                        }
-                                        className="cursor-pointer rounded-lg"
-                                      >
-                                        <Edit2 className="h-4 w-4 mr-2" />
-                                        Edit Message
-                                      </DropdownMenuItem>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuItem
-                                        className="text-destructive cursor-pointer rounded-lg focus:text-destructive"
-                                        onClick={() =>
-                                          removeMessage(message.id)
-                                        }
-                                      >
-                                        <Trash2 className="h-4 w-4 mr-2" />
-                                        Delete Message
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                </DropdownMenuContent>
+                                {renderMessageActions(message, isCurrentUser)}
                               </DropdownMenu>
                             </div>
                           </div>
@@ -2416,7 +2367,7 @@ export function ChatroomMessagesEnhanced({
                         ref={textareaRef}
                         placeholder={
                           replyingTo
-                            ? `Replying to ${replyingTo.user?.full_name}...`
+                            ? `Replying to ${replyingTo.user_profile?.full_name}...`
                             : "Type message..."
                         }
                         value={input}
