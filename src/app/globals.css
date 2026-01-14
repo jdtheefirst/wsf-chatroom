@@ -202,13 +202,46 @@ body {
   transition: opacity 200ms, transform 200ms;
 }
 
-.reactions-picker-container {
+/* Ensure the picker appears above other elements */
+.reaction-picker-container {
   position: relative;
 }
 
-.reactions-picker {
-  position: absolute;
-  bottom: 100%;
+/* Add a click outside handler */
+.reaction-picker-overlay {
+  position: fixed;
+  top: 0;
   left: 0;
-  z-index: 50;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+}
+
+/* Prevent horizontal overflow */
+.members-tab-content {
+  overflow-x: hidden;
+}
+
+/* Ensure proper scrolling on mobile */
+@media (max-width: 640px) {
+  .members-tab-content {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Better touch targets */
+  .user-card {
+    min-height: 64px;
+  }
+}
+
+/* Hide scrollbar on mobile but keep functionality */
+@media (max-width: 640px) {
+  .hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

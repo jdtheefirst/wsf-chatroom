@@ -84,7 +84,7 @@ type Props = {
 };
 
 // Common reaction emojis
-const COMMON_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉"];
+const COMMON_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "🤑", "🙌"];
 
 export function ChatroomMessagesEnhanced({
   chatroom,
@@ -548,7 +548,6 @@ export function ChatroomMessagesEnhanced({
           table: "message_reactions",
         },
         async (payload) => {
-          console.log("Reaction change:", payload);
           const reaction = payload.new as any;
 
           if (payload.eventType === "INSERT") {
@@ -1424,17 +1423,34 @@ export function ChatroomMessagesEnhanced({
     );
   };
 
-  // Add to the message render function: Reactions section
+  // In your message render function, update the reactions section:
   const renderReactions = (message: MessageRow) => {
     if (
       !message.reactions_count ||
       Object.keys(message.reactions_count).length === 0
     ) {
-      return null;
+      return (
+        <div className="mt-2 relative">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 rounded-full"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowReactionsPicker(
+                showReactionsPicker === message.id ? null : message.id
+              );
+            }}
+          >
+            <SmilePlus className="h-4 w-4" />
+          </Button>
+          {showReactionsPicker === message.id && renderReactionsPicker(message)}
+        </div>
+      );
     }
 
     return (
-      <div className="mt-2 flex items-center gap-1">
+      <div className="mt-2 flex items-center gap-1 relative">
         <div className="flex items-center gap-1 flex-wrap">
           {Object.entries(message.reactions_count).map(([emoji, count]) => (
             <Button
@@ -1458,32 +1474,35 @@ export function ChatroomMessagesEnhanced({
           variant="ghost"
           size="icon"
           className="h-7 w-7 rounded-full"
-          onClick={() =>
+          onClick={(e) => {
+            e.stopPropagation();
             setShowReactionsPicker(
               showReactionsPicker === message.id ? null : message.id
-            )
-          }
+            );
+          }}
         >
           <SmilePlus className="h-4 w-4" />
         </Button>
+        {showReactionsPicker === message.id && renderReactionsPicker(message)}
       </div>
     );
   };
 
-  // Add reactions picker UI
+  // Update the renderReactionsPicker function:
   const renderReactionsPicker = (message: MessageRow) => {
     if (showReactionsPicker !== message.id) return null;
 
     return (
       <div className="absolute bottom-full left-0 mb-2 p-2 bg-card border rounded-xl shadow-lg z-50">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
           {COMMON_REACTIONS.map((emoji) => (
             <Button
               key={emoji}
               variant="ghost"
               size="icon"
-              className="h-8 w-8 hover:scale-110 transition-transform"
-              onClick={() => {
+              className="h-8 w-8 hover:scale-110 transition-transform hover:bg-muted"
+              onClick={(e) => {
+                e.stopPropagation();
                 toggleReaction(message.id, emoji);
                 setShowReactionsPicker(null);
               }}
@@ -1491,6 +1510,20 @@ export function ChatroomMessagesEnhanced({
               <span className="text-lg">{emoji}</span>
             </Button>
           ))}
+          {/* Add an emoji picker button for more options */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 hover:scale-110 transition-transform"
+            onClick={(e) => {
+              e.stopPropagation();
+              // You could open a full emoji picker here
+              setShowReactionsPicker(null);
+            }}
+            title="More emojis"
+          >
+            <SmilePlus className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     );
@@ -2749,116 +2782,229 @@ export function ChatroomMessagesEnhanced({
             </div>
           </TabsContent>
 
-          {/* Online Users Tab - Updated */}
+          {/* Enhanced Online Users Tab */}
           <TabsContent
             value="members"
             className="min-h-0 overflow-auto p-2 sm:p-6 h-full overflow-y-auto mt-0"
           >
-            <div className="max-w-4xl mx-auto space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Online Members</h3>
-                <Badge variant="outline" className="gap-1">
-                  <Users className="h-3 w-3" />
-                  {onlineCount} online
-                </Badge>
+            <div className="max-w-4xl mx-auto space-y-6">
+              {/* Header with stats */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold">Members</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Connect with fellow WSF members
+                  </p>
+                </div>
+                <div className="flex items-center justify-evenly gap-2 sm:gap-4 w-full">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-primary">
+                      {onlineCount}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Online Now
+                    </div>
+                  </div>
+                  <Separator orientation="vertical" className="h-8" />
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      {onlineUsers.length}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Total Members
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                {onlineUsers.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                    <p>No members online right now</p>
-                    <p className="text-sm mt-1">
-                      Be the first to start chatting!
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {onlineUsers
-                      .filter((user) => user.status === "online")
-                      .map((user) => (
-                        <div
-                          key={user.id}
-                          className="flex items-center gap-3 p-3 rounded-lg border hover:bg-muted/50 transition-colors"
-                        >
-                          <div className="relative">
-                            <Avatar>
-                              <AvatarImage src={user.avatar_url || ""} />
-                              <AvatarFallback>
-                                {getInitials(user.full_name)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-background bg-green-500" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-medium truncate">
-                                {user.full_name || "Anonymous"}
-                              </p>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-xs",
-                                  getBeltColor(user.belt_level)
-                                )}
-                              >
-                                Belt {user.belt_level}
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <Globe className="h-3 w-3" />
-                                {user.country_code.toUpperCase()}
-                              </span>
-                              <span>•</span>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" />
-                                Just now
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+              {/* Filter tabs */}
+              <Tabs defaultValue="online" className="w-full">
+                <TabsList className="grid grid-cols-3 w-full max-w-xs">
+                  <TabsTrigger value="online" className="gap-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                    Online
+                  </TabsTrigger>
+                  <TabsTrigger value="all" className="gap-2">
+                    <Users className="h-4 w-4" />
+                    All
+                  </TabsTrigger>
+                  <TabsTrigger value="elite" className="gap-2">
+                    <Crown className="h-4 w-4" />
+                    Elite+
+                  </TabsTrigger>
+                </TabsList>
 
-                    {/* Recently offline users */}
-                    {onlineUsers.filter((user) => user.status === "away")
-                      .length > 0 && (
-                      <>
-                        <Separator className="my-4" />
-                        <h4 className="text-sm font-medium text-muted-foreground">
-                          Recently Active
-                        </h4>
-                        {onlineUsers
-                          .filter((user) => user.status === "away")
-                          .map((user) => (
-                            <div
-                              key={user.id}
-                              className="flex items-center gap-3 p-3 rounded-lg border opacity-60"
-                            >
-                              <Avatar>
-                                <AvatarImage src={user.avatar_url || ""} />
-                                <AvatarFallback>
-                                  {getInitials(user.full_name)}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-medium">
-                                  {user.full_name || "Anonymous"}
-                                </p>
-                                <p className="text-xs text-muted-foreground">
-                                  Away •{" "}
-                                  {formatDistanceToNow(
-                                    new Date(user.last_seen)
-                                  )}{" "}
-                                  ago
-                                </p>
+                <TabsContent value="online" className="mt-4">
+                  {onlineUsers.filter((user) => user.status === "online")
+                    .length === 0 ? (
+                    <div className="text-center py-12 border rounded-xl bg-gradient-to-br from-muted/20 to-muted/10">
+                      <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+                        <Users className="h-8 w-8 text-primary/60" />
+                      </div>
+                      <h4 className="font-semibold mb-2">No members online</h4>
+                      <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                        Be the first to start chatting! Members who join will
+                        appear here.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {onlineUsers
+                        .filter((user) => user.status === "online")
+                        .sort((a, b) => {
+                          // Sort by elite+ first, then belt level
+                          if (a.elite_plus && !b.elite_plus) return -1;
+                          if (!a.elite_plus && b.elite_plus) return 1;
+                          return (b.belt_level || 0) - (a.belt_level || 0);
+                        })
+                        .map((user) => renderUserCard(user, true))}
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="all" className="mt-4">
+                  {onlineUsers.length === 0 ? (
+                    <div className="text-center py-12 border rounded-xl">
+                      <Users className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-muted-foreground">
+                        No members in this chatroom
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {onlineUsers
+                        .sort((a, b) => {
+                          // Sort by status (online first), then elite+, then belt level
+                          if (a.status === "online" && b.status !== "online")
+                            return -1;
+                          if (a.status !== "online" && b.status === "online")
+                            return 1;
+                          if (a.elite_plus && !b.elite_plus) return -1;
+                          if (!a.elite_plus && b.elite_plus) return 1;
+                          return (b.belt_level || 0) - (a.belt_level || 0);
+                        })
+                        .map((user) =>
+                          renderUserCard(user, user.status === "online")
+                        )}
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="elite" className="mt-4">
+                  {onlineUsers.filter((user) => user.elite_plus).length ===
+                  0 ? (
+                    <div className="text-center py-12 border rounded-xl bg-gradient-to-br from-yellow-50 to-amber-50 dark:from-yellow-950/20 dark:to-amber-950/20">
+                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-100 to-amber-100 dark:from-yellow-900/30 dark:to-amber-900/30 flex items-center justify-center mx-auto mb-4">
+                        <Crown className="h-8 w-8 text-yellow-600 dark:text-yellow-500" />
+                      </div>
+                      <h4 className="font-semibold mb-2">No Elite+ members</h4>
+                      <p className="text-muted-foreground text-sm max-w-md mx-auto">
+                        Elite+ members are certified instructors and senior
+                        practitioners. They'll appear here when they join.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {onlineUsers
+                        .filter((user) => user.elite_plus)
+                        .sort((a, b) => {
+                          // Sort by elite level, then belt level
+                          const aLevel = a.elite_plus_level || 0;
+                          const bLevel = b.elite_plus_level || 0;
+                          if (bLevel !== aLevel) return bLevel - aLevel;
+                          return (b.belt_level || 0) - (a.belt_level || 0);
+                        })
+                        .map((user) =>
+                          renderUserCard(user, user.status === "online")
+                        )}
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              {/* Statistics Section */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-8">
+                <div className="rounded-xl border p-4 bg-gradient-to-br from-primary/5 to-primary/10">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-sm">Belt Distribution</h4>
+                    <Trophy className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="space-y-2">
+                    {["Beginner", "Intermediate", "Advanced", "Elite"].map(
+                      (level, idx) => {
+                        const count = onlineUsers.filter((user) => {
+                          const belt = getBeltInfo(user.belt_level || 0);
+                          const program = getCurrentProgram(
+                            user.belt_level || 0
+                          );
+                          return program.title === level;
+                        }).length;
+
+                        const percentage =
+                          onlineUsers.length > 0
+                            ? Math.round((count / onlineUsers.length) * 100)
+                            : 0;
+
+                        return (
+                          <div
+                            key={level}
+                            className="flex items-center justify-between text-sm"
+                          >
+                            <span className="text-muted-foreground">
+                              {level}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">{count}</span>
+                              <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-primary rounded-full"
+                                  style={{ width: `${percentage}%` }}
+                                />
                               </div>
                             </div>
-                          ))}
-                      </>
+                          </div>
+                        );
+                      }
                     )}
                   </div>
-                )}
+                </div>
+
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-sm">Elite+ Members</h4>
+                    <Crown className="h-4 w-4 text-yellow-600" />
+                  </div>
+                  <div className="text-center py-4">
+                    <div className="text-3xl font-bold text-yellow-600 mb-1">
+                      {onlineUsers.filter((u) => u.elite_plus).length}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Certified Instructors
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-sm">Average Belt Level</h4>
+                    <TrendingUp className="h-4 w-4 text-green-600" />
+                  </div>
+                  <div className="text-center py-4">
+                    <div className="text-3xl font-bold mb-1">
+                      {onlineUsers.length > 0
+                        ? Math.round(
+                            onlineUsers.reduce(
+                              (acc, user) => acc + (user.belt_level || 0),
+                              0
+                            ) / onlineUsers.length
+                          )
+                        : 0}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Average belt rank
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </TabsContent>
@@ -2866,4 +3012,227 @@ export function ChatroomMessagesEnhanced({
       </div>
     </div>
   );
+}
+
+function renderUserCard(user: PresenceUser, isOnline: boolean) {
+  const beltInfo = getBeltInfo(user.belt_level || 0);
+  const eliteLevel = user.elite_plus
+    ? getElitePlusLevelInfo(user.elite_plus_level || 0)
+    : null;
+  const program = getCurrentProgram(user.belt_level || 0);
+  const nextBelt = getNextBelt(user.belt_level || 0);
+  const progressPercentage = getProgressPercentage(user.belt_level || 0);
+  const isMaxLevel = user.belt_level === beltOptions.length - 1;
+
+  return (
+    <div
+      key={user.id}
+      className="flex items-center gap-2 sm:gap-4 p-3 sm:p-4 rounded-lg sm:rounded-xl border hover:bg-muted/30 transition-all duration-200 group"
+    >
+      {/* Avatar section - simpler on mobile */}
+      <div className="relative flex-shrink-0">
+        <div className="relative">
+          {/* Progress ring - hidden on mobile */}
+          <div className="hidden sm:block absolute -inset-1">
+            <svg className="w-14 h-14 transform -rotate-90">
+              <circle
+                cx="28"
+                cy="28"
+                r="24"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                className="text-muted-foreground/20"
+              />
+              <circle
+                cx="28"
+                cy="28"
+                r="24"
+                stroke={beltInfo.color}
+                strokeWidth="2"
+                fill="none"
+                strokeDasharray={`${progressPercentage * 1.5} 150`}
+                className="transition-all duration-500"
+              />
+            </svg>
+          </div>
+
+          <Avatar className="h-10 w-10 sm:h-12 sm:w-12 border-2 border-background relative z-10">
+            <AvatarImage src={user.avatar_url || ""} />
+            <AvatarFallback className="bg-gradient-to-br from-primary/20 to-primary/10 text-xs sm:text-sm">
+              {getInitials(user.full_name)}
+            </AvatarFallback>
+          </Avatar>
+
+          {/* Elite+ crown - smaller on mobile */}
+          {user.elite_plus && (
+            <div className="absolute -top-1 -right-1">
+              <div className="h-4 w-4 sm:h-6 sm:w-6 rounded-full bg-gradient-to-br from-yellow-400 to-amber-500 flex items-center justify-center border border-background shadow-sm sm:shadow-lg">
+                <Crown className="h-2 w-2 sm:h-3 sm:w-3 text-white" />
+              </div>
+            </div>
+          )}
+
+          {/* Online status */}
+          <div
+            className={`absolute -bottom-0.5 -right-0.5 h-2 w-2 sm:h-3 sm:w-3 rounded-full border border-background ${
+              isOnline ? "bg-green-500" : "bg-gray-400"
+            }`}
+          />
+        </div>
+      </div>
+
+      {/* User info - responsive layout */}
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 sm:gap-2 mb-2">
+          {/* Left side - Name and badges */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1 sm:gap-2 mb-1">
+              <p className="font-semibold text-sm sm:text-base truncate">
+                {user.full_name || "Anonymous"}
+              </p>
+              {/* Admission no - only on larger screens */}
+              {user.admission_no && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-normal px-1.5"
+                >
+                  {user.admission_no}
+                </Badge>
+              )}
+            </div>
+
+            {/* Badges - responsive layout */}
+            <div className="flex items-center gap-1 flex-wrap">
+              {/* Belt badge - simplified text on mobile */}
+              <Badge
+                className="text-[10px] sm:text-xs py-0.5 px-1.5 sm:px-2 border rounded-full truncate max-w-[80px] sm:max-w-none !bg-transparent"
+                style={{
+                  backgroundColor:
+                    beltInfo.level === 0
+                      ? "rgba(0, 0, 0, 0.1) !important" // Light gray for white belt
+                      : `${beltInfo.color}20 !important`,
+                  borderColor:
+                    beltInfo.level === 0
+                      ? "rgba(0, 0, 0, 0.2) !important"
+                      : `${beltInfo.color}40 !important`,
+                  color: beltInfo.level === 0 ? "black !important" : "inherit",
+                }}
+              >
+                <span className="hidden xs:inline">{beltInfo.name}</span>
+                <span className="xs:hidden">{beltInfo.name.split(" ")[0]}</span>
+              </Badge>
+
+              {/* Program badge - hidden on very small screens */}
+              <Badge variant="secondary" className="text-[10px] py-0 px-1.5">
+                {program.title.split(" ")[0]}
+              </Badge>
+
+              {/* Elite+ badge - simplified on mobile */}
+              {eliteLevel && (
+                <Badge
+                  variant="destructive"
+                  className="text-[10px] py-0 px-1.5 bg-gradient-to-r from-yellow-500/20 to-amber-500/20 border-yellow-400/30 truncate max-w-[70px]"
+                >
+                  <span className="hidden sm:inline">
+                    Elite+ {eliteLevel.name}
+                  </span>
+                  <span className="sm:hidden">
+                    E+ {eliteLevel.name.charAt(0)}
+                  </span>
+                </Badge>
+              )}
+            </div>
+          </div>
+
+          {/* Right side - Status and country */}
+          <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-0 sm:flex-col sm:items-end sm:text-right">
+            <div className="text-xs text-muted-foreground">
+              {isOnline ? (
+                <span className="flex items-center gap-1 text-green-600">
+                  <div className="h-1.5 w-1.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="hidden sm:inline">Online</span>
+                  <span className="sm:hidden">Live</span>
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  <span className="hidden sm:inline">
+                    {formatDistanceToNow(new Date(user.last_seen))} ago
+                  </span>
+                  <span className="sm:hidden text-[10px]">
+                    {formatDistanceToNowShort(new Date(user.last_seen))}
+                  </span>
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground flex items-center gap-1">
+              <Globe className="h-3 w-3 flex-shrink-0" />
+              <span className="truncate max-w-[60px] sm:max-w-none">
+                {user.country_code?.toUpperCase() || "Unknown"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bar - simplified on mobile */}
+        {!isMaxLevel && nextBelt && (
+          <div className="space-y-1 mt-1 sm:mt-0">
+            <div className="flex items-center justify-between text-[10px] sm:text-xs">
+              <span className="text-muted-foreground truncate max-w-[100px] sm:max-w-none">
+                <span className="hidden sm:inline">
+                  Progress to {nextBelt.name}
+                </span>
+                <span className="sm:hidden">
+                  To {nextBelt.name.split(" ")[0]}
+                </span>
+              </span>
+              <span className="font-medium flex-shrink-0">
+                {Math.round(progressPercentage)}%
+              </span>
+            </div>
+            <div className="h-1 sm:h-1.5 w-full bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${progressPercentage}%`,
+                  backgroundColor: beltInfo.color,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Max level indicator - simplified */}
+        {isMaxLevel && (
+          <div className="flex items-center gap-1 sm:gap-2 mt-1">
+            <div className="flex items-center gap-1 px-2 py-0.5 sm:py-1 rounded-full bg-gradient-to-r from-yellow-50 to-amber-50 dark:from-yellow-900/20 dark:to-amber-900/20">
+              <Crown className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-600" />
+              <span className="text-[10px] sm:text-xs font-medium truncate">
+                <span className="hidden sm:inline">Grand Master Level</span>
+                <span className="sm:hidden">GM Level</span>
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Add this helper function
+function formatDistanceToNowShort(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 60) {
+    return `${diffMins}m`;
+  } else if (diffHours < 24) {
+    return `${diffHours}h`;
+  } else {
+    return `${diffDays}d`;
+  }
 }
