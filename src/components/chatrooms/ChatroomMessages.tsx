@@ -50,6 +50,12 @@ import {
   BellOff,
   Reply,
   SmilePlus,
+  ExternalLink,
+  Link,
+  Code,
+  BookOpen,
+  ImageIcon,
+  Play,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -75,6 +81,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardItem } from "./LeaderboardItem";
 import { Howl } from "howler";
 import { ReactionNotification } from "./ReactionNotification";
+import LinkPreview from "./LinkPreviews";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -1340,12 +1347,206 @@ export function ChatroomMessagesEnhanced({
   const renderMessageContent = (message: MessageRow) => {
     const translated = message.translated_content?.[targetLang];
     const showTranslated = translated && targetLang !== message.language;
+    const contentToRender = showTranslated ? translated : message.content;
+
+    // Function to detect and render links, HTML, etc.
+    const renderEnhancedContent = (text: string) => {
+      if (!text) return null;
+
+      // Split by URLs to handle them specially
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const parts = text.split(urlRegex);
+
+      return parts.map((part, index) => {
+        // Check if this part is a URL
+        if (urlRegex.test(part)) {
+          return (
+            <span key={index} className="inline-block">
+              {renderLink(part, index)}
+            </span>
+          );
+        }
+
+        // Check for other patterns
+        return renderTextWithPatterns(part, index);
+      });
+    };
+
+    // Function to render a link
+    const renderLink = (url: string, key: number) => {
+      try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname;
+
+        // Get appropriate icon based on domain
+        const getLinkIcon = () => {
+          if (
+            hostname.includes("youtube.com") ||
+            hostname.includes("youtu.be")
+          ) {
+            return <Play className="h-3.5 w-3.5 text-red-500" />;
+          }
+          if (hostname.includes("instagram.com")) {
+            return <ImageIcon className="h-3.5 w-3.5 text-pink-500" />;
+          }
+          if (hostname.includes("twitter.com") || hostname.includes("x.com")) {
+            return <MessageSquare className="h-3.5 w-3.5 text-blue-500" />;
+          }
+          if (hostname.includes("worldsamma.org")) {
+            return <Globe className="h-3.5 w-3.5 text-primary" />;
+          }
+          if (hostname.includes("blog.") || hostname.includes("medium.com")) {
+            return <BookOpen className="h-3.5 w-3.5 text-green-500" />;
+          }
+          if (hostname.includes("github.com")) {
+            return <Code className="h-3.5 w-3.5" />;
+          }
+          return <Link className="h-3.5 w-3.5 text-muted-foreground" />;
+        };
+
+        return (
+          <>
+            <a
+              key={key}
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-primary hover:text-primary/80 font-medium underline underline-offset-2 transition-colors group ml-1 mr-1"
+            >
+              {getLinkIcon()}
+              <span className="truncate max-w-[150px] sm:max-w-[200px]">
+                {hostname.replace("www.", "")}
+              </span>
+              <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </a>
+          </>
+        );
+      } catch (error) {
+        return (
+          <a
+            key={key}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:text-primary/80 underline underline-offset-2"
+          >
+            {url}
+          </a>
+        );
+      }
+    };
+
+    // Function to render text with patterns
+    const renderTextWithPatterns = (text: string, key: number) => {
+      if (!text.trim()) return null;
+
+      // Split by various patterns
+      const patterns = [
+        // Hashtags
+        /(#[\w\u4e00-\u9fa5]+)/g,
+        // Mentions
+        /(@[\w\u4e00-\u9fa5]+)/g,
+        // Money amounts
+        /(\$\d+(?:\.\d+)?[KM]?(?:\s*\/\s*(?:month|year|week|day))?)/gi,
+        // Important numbers
+        /(\b\d+[KM]?(?:\s*\/\s*(?:month|year|week|day))?\b)/gi,
+      ];
+
+      let parts: React.ReactNode[] = [text];
+
+      patterns.forEach((pattern, patternIndex) => {
+        const newParts: React.ReactNode[] = [];
+        parts.forEach((part, partIndex) => {
+          if (typeof part === "string") {
+            const splitParts = part.split(pattern);
+            splitParts.forEach((splitPart, splitIndex) => {
+              const uniqueKey = `${key}-${patternIndex}-${partIndex}-${splitIndex}`;
+
+              if (pattern.test(splitPart)) {
+                // Apply special styling based on pattern
+                if (pattern.toString().includes("#")) {
+                  newParts.push(
+                    <span
+                      key={uniqueKey}
+                      className="text-primary font-medium hover:text-primary/80 cursor-pointer bg-primary/5 px-1 rounded"
+                      onClick={() => {
+                        // Navigate to hashtag search
+                        router.push(
+                          `/search?q=${encodeURIComponent(splitPart)}`
+                        );
+                      }}
+                    >
+                      {splitPart}
+                    </span>
+                  );
+                } else if (pattern.toString().includes("@")) {
+                  newParts.push(
+                    <span
+                      key={uniqueKey}
+                      className="text-blue-600 dark:text-blue-400 font-medium hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer bg-blue-50 dark:bg-blue-900/20 px-1 rounded"
+                      onClick={() => {
+                        // Search for user
+                        console.log("Search mention:", splitPart);
+                      }}
+                    >
+                      {splitPart}
+                    </span>
+                  );
+                } else if (pattern.toString().includes("\\$")) {
+                  newParts.push(
+                    <span
+                      key={uniqueKey}
+                      className="text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 px-1.5 py-0.5 rounded"
+                    >
+                      {splitPart}
+                    </span>
+                  );
+                } else {
+                  // Important numbers
+                  newParts.push(
+                    <span
+                      key={uniqueKey}
+                      className="text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-900/20 px-1 rounded"
+                    >
+                      {splitPart}
+                    </span>
+                  );
+                }
+              } else {
+                newParts.push(splitPart);
+              }
+            });
+          } else {
+            newParts.push(part);
+          }
+        });
+        parts = newParts;
+      });
+
+      return <span key={key}>{parts}</span>;
+    };
 
     return (
-      <div className="space-y-2">
-        <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-          {showTranslated ? translated : message.content}
-        </p>
+      <div className="space-y-3">
+        <div className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+          {renderEnhancedContent(contentToRender)}
+        </div>
+
+        {/* Link previews for URLs in the message */}
+        {(() => {
+          const links = extractLinks(message.content);
+          if (links.length > 0) {
+            return (
+              <div className="mt-3 space-y-2">
+                {links.map((link, index) => (
+                  <LinkPreview key={index} url={link} />
+                ))}
+              </div>
+            );
+          }
+          return null;
+        })()}
+
         {showTranslated && (
           <div className="group">
             <div
@@ -1361,12 +1562,20 @@ export function ChatroomMessagesEnhanced({
             </div>
             <div className="mt-2 text-xs text-muted-foreground bg-muted/50 rounded-lg p-3 border border-border/50">
               <span className="font-medium block mb-1">Original:</span>
-              {message.content}
+              {renderEnhancedContent(message.content)}
             </div>
           </div>
         )}
       </div>
     );
+  };
+
+  // Helper function to extract all links from text
+  const extractLinks = (text: string): string[] => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const matches = text.match(urlRegex) || [];
+    // Deduplicate links
+    return [...new Set(matches)];
   };
 
   // Add to the UI: Reply preview component
