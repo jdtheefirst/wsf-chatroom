@@ -74,6 +74,7 @@ import { ChatroomRecord, MessageRow } from "@/lib/chatrooms/types";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LeaderboardItem } from "./LeaderboardItem";
 import { Howl } from "howler";
+import { ReactionNotification } from "./ReactionNotification";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -146,6 +147,8 @@ export function ChatroomMessagesEnhanced({
   const leaderboardRefetchTimeout = useRef<NodeJS.Timeout | null>(null);
   const [isSoundEnabled, setIsSoundEnabled] = useState(false);
   const [soundInstance, setSoundInstance] = useState<Howl | null>(null);
+  // Add a different sound for reactions
+  const [reactionSound, setReactionSound] = useState<Howl | null>(null);
   const audioPermissionRef = useRef(false);
 
   // Load sound and check permission on component mount
@@ -173,6 +176,34 @@ export function ChatroomMessagesEnhanced({
       sound.unload();
     };
   }, []);
+
+  useEffect(() => {
+    // Load reaction sound
+    const reactionSoundInstance = new Howl({
+      src: ["/sounds/reaction-notification.mp3"], // Different sound for reactions
+      volume: 0.4,
+      preload: true,
+      onloaderror: (id, error) => {
+        console.error("Failed to load reaction sound:", error);
+      },
+    });
+
+    setReactionSound(reactionSoundInstance);
+
+    return () => {
+      reactionSoundInstance.unload();
+    };
+  }, []);
+
+  const playReactionSound = () => {
+    if (!reactionSound || !isSoundEnabled) return;
+
+    try {
+      reactionSound.play();
+    } catch (error) {
+      console.error("Error playing reaction sound:", error);
+    }
+  };
 
   // Function to request audio permission
   const requestAudioPermission = async () => {
@@ -1604,6 +1635,11 @@ export function ChatroomMessagesEnhanced({
 
   return (
     <div className="flex flex-col h-[calc(100vh-80px)] bg-background rounded-xl border shadow-sm overflow-hidden">
+      <ReactionNotification
+        supabase={supabase}
+        profileId={profile?.id!}
+        playMessageSound={playReactionSound}
+      />
       {/* Header - Fixed & Responsive */}
       <div className="flex-shrink-0 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b bg-card/50 backdrop-blur-sm">
         <div className="flex items-center gap-2 sm:gap-4">
