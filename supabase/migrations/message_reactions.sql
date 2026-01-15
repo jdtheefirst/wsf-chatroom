@@ -23,10 +23,10 @@ CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to);
 -- create message_reaction policies
 ALTER TABLE message_reactions ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Users can view reactions"
+CREATE POLICY "Public can view reactions"
 ON message_reactions
 FOR SELECT
-TO authenticated
+TO anon, authenticated
 USING (true);
 
 CREATE POLICY "Users can add reactions as themselves"

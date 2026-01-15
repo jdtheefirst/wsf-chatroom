@@ -1579,42 +1579,55 @@ export function ChatroomMessagesEnhanced({
   };
 
   // Add to the UI: Reply preview component
-  // Add to the UI: Reply preview component
   const renderReplyPreview = () => {
     if (!replyingTo) return null;
 
+    const replyText = replyingTo.content;
+    const shouldTruncate = replyText.length > 100;
+    const displayedText = shouldTruncate
+      ? `${replyText.substring(0, 100)}...`
+      : replyText;
+
     return (
-      <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800/30 flex items-center justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-2 mb-1">
-            <Reply className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+      <div className="mb-3 p-3 rounded-xl bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 border border-blue-200 dark:border-blue-800/30 flex items-center gap-3">
+        <Reply className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+
+        <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="mb-1">
             <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
               Replying to {replyingTo.user_profile?.full_name || "User"}
             </span>
           </div>
-          <div className="text-sm text-blue-600 dark:text-blue-400 truncate">
-            {replyingTo.content.length > 100
-              ? `${replyingTo.content.substring(0, 100)}...`
-              : replyingTo.content}
+          <div className="text-sm text-blue-600 dark:text-blue-400">
+            {/* Container with truncation */}
+            <div className="truncate">{displayedText}</div>
+
+            {/* Show full text on hover (optional) */}
+            {shouldTruncate && (
+              <div className="absolute invisible group-hover:visible z-10 mt-1 max-w-md p-2 bg-white dark:bg-gray-900 border rounded shadow-lg text-xs">
+                {replyText}
+              </div>
+            )}
           </div>
         </div>
+
         <Button
           variant="ghost"
           size="icon"
           onClick={() => {
-            // When cancelling reply, keep the @username in input if user typed after it
             const currentInput = input;
             const username = replyingTo.user_profile?.full_name || "User";
             const replyPrefix = `@${username} `;
 
             if (currentInput.startsWith(replyPrefix)) {
-              setInput(replyPrefix); // Keep only the @username
+              setInput(replyPrefix);
             } else {
-              setInput(""); // Clear completely
+              setInput("");
             }
             setReplyingTo(null);
           }}
-          className="h-7 w-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30"
+          className="h-7 w-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 flex-shrink-0"
+          title="Cancel reply"
         >
           <X className="h-4 w-4" />
         </Button>
