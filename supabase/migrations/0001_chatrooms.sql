@@ -191,3 +191,120 @@ CREATE INDEX IF NOT EXISTS idx_messages_chatroom_created ON messages(chatroom_id
 CREATE INDEX IF NOT EXISTS idx_messages_chatroom_user ON messages(chatroom_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
 
+-- Add reply_is_private column to messages table
+ALTER TABLE public.messages 
+ADD COLUMN IF NOT EXISTS reply_is_private boolean DEFAULT false;
+
+-- Add index for better query performance
+CREATE INDEX IF NOT EXISTS idx_messages_reply_to ON messages(reply_to) WHERE reply_to IS NOT NULL;
+
+-- Add index for private replies
+CREATE INDEX IF NOT EXISTS idx_messages_private_replies ON messages(reply_to, reply_is_private) 
+WHERE reply_to IS NOT NULL AND reply_is_private = true;
+
+-- Add recipient_id column for private replies
+ALTER TABLE public.messages 
+ADD COLUMN IF NOT EXISTS reply_recipient_id uuid REFERENCES public.users_profile(id) ON DELETE SET NULL;
+
+-- Create index on recipient_id for private replies
+CREATE INDEX IF NOT EXISTS idx_messages_private_recipient ON messages(reply_recipient_id) 
+WHERE reply_is_private = true AND reply_recipient_id IS NOT NULL;
+
+-- Combined index for all private reply checks
+CREATE INDEX IF NOT EXISTS idx_messages_private_composite ON messages(id, user_id, reply_recipient_id) 
+WHERE reply_is_private = true;
+
+-- Function to set recipient_id automatically
+CREATE OR REPLACE FUNCTION set_reply_recipient()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF NEW.reply_to IS NOT NULL AND NEW.reply_is_private = true THEN
+    -- Get the user_id of the message being replied to
+    SELECT user_id INTO NEW.reply_recipient_id
+    FROM messages
+    WHERE id = NEW.reply_to;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Trigger to automatically set recipient_id
+DROP TRIGGER IF EXISTS set_reply_recipient_trigger ON messages;
+CREATE TRIGGER set_reply_recipient_trigger
+  BEFORE INSERT OR UPDATE OF reply_to, reply_is_private ON messages
+  FOR EACH ROW
+  EXECUTE FUNCTION set_reply_recipient();
+
+-- Update existing messages
+UPDATE messages m1
+SET reply_recipient_id = m2.user_id
+FROM messages m2
+WHERE m1.reply_to = m2.id
+  AND m1.reply_is_private = true
+  AND m1.reply_recipient_id IS NULL;
+
+-- Replace the policy
+DROP POLICY IF EXISTS "Messages read with private reply control" ON public.messages;
+
+-- Ultra-fast policy with denormalized data
+CREATE POLICY "Messages read with private reply control" ON public.messages
+FOR SELECT USING (
+  CASE 
+    WHEN reply_is_private = true AND reply_to IS NOT NULL THEN
+      -- Single, indexed check: author OR recipient
+      user_id = auth.uid() OR reply_recipient_id = auth.uid()
+    ELSE
+      -- Regular message: apply existing visibility rules
+      (
+        EXISTS (
+          SELECT 1 FROM public.chatrooms c
+          WHERE c.id = messages.chatroom_id AND c.type = 'wsf_fans'
+        )
+        OR public.is_chat_member(messages.chatroom_id, auth.uid())
+      )
+  END
+);
+
+-- Create a function for efficient leaderboard calculation
+CREATE OR REPLACE FUNCTION get_chatroom_leaderboard(
+  p_chatroom_id uuid,
+  p_start_date timestamptz,
+  p_limit integer DEFAULT 10
+)
+RETURNS TABLE (
+  user_id uuid,
+  full_name text,
+  admission_no text,
+  avatar_url text,
+  belt_level integer,
+  country_code text,
+  message_count bigint
+)
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    up.id,
+    up.full_name,
+    up.admission_no,
+    up.avatar_url,
+    up.belt_level,
+    up.country_code,
+    COUNT(m.id)::bigint as message_count
+  FROM messages m
+  JOIN users_profile up ON m.user_id = up.id
+  WHERE m.chatroom_id = p_chatroom_id
+    AND m.created_at >= p_start_date
+    AND (m.reply_is_private = false OR m.user_id = auth.uid() OR m.reply_recipient_id = auth.uid())
+  GROUP BY up.id
+  ORDER BY message_count DESC
+  LIMIT p_limit;
+END;
+$$;

@@ -35,6 +35,7 @@ const getChatroomData = cache(async (id: string) => {
       created_at,
       user_id,
       reply_to,
+      reply_is_private,
       reactions_count,
       user_profile:users_profile!messages_user_id_fkey (
         id,
@@ -48,7 +49,7 @@ const getChatroomData = cache(async (id: string) => {
         completed_all_programs,
         elite_plus_level
       )
-    `
+    `,
     )
     .eq("chatroom_id", id)
     .order("created_at", { ascending: false }) // Get newest first
@@ -69,7 +70,7 @@ const getChatroomData = cache(async (id: string) => {
     ...new Set(
       messages
         .filter((msg: any) => msg.reply_to)
-        .map((msg: any) => msg.reply_to)
+        .map((msg: any) => msg.reply_to),
     ),
   ];
 
@@ -98,7 +99,7 @@ const getChatroomData = cache(async (id: string) => {
           completed_all_programs,
           elite_plus_level
         )
-      `
+      `,
       )
       .in("id", replyIds);
 

@@ -155,6 +155,36 @@ body {
   }
 }
 
+/* Add these styles */
+.highlight-pulse {
+  animation: pulse-highlight 2s ease-in-out;
+}
+
+@keyframes pulse-highlight {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  50% {
+    background-color: rgba(168, 85, 247, 0.1);
+  }
+}
+
+.private-reply-indicator {
+  position: relative;
+}
+
+.private-reply-indicator::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: linear-gradient(to bottom, #8b5cf6, #7c3aed);
+  border-radius: 3px;
+}
+
 .highlighted-message {
   border: 2px solid #3b82f6 !important;
   background-color: rgba(59, 130, 246, 0.1) !important;
@@ -188,7 +218,9 @@ body {
 .emoji-picker-enter-active {
   opacity: 1;
   transform: translateY(0) scale(1);
-  transition: opacity 200ms, transform 200ms;
+  transition:
+    opacity 200ms,
+    transform 200ms;
 }
 
 .emoji-picker-exit {
@@ -199,7 +231,9 @@ body {
 .emoji-picker-exit-active {
   opacity: 0;
   transform: translateY(-10px) scale(0.9);
-  transition: opacity 200ms, transform 200ms;
+  transition:
+    opacity 200ms,
+    transform 200ms;
 }
 
 /* Ensure the picker appears above other elements */

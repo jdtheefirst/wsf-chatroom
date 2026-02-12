@@ -46,6 +46,7 @@ export type MessageRow = {
   created_at: string;
   user_profile: UserProfile | null;
   reply_to?: string | null;
+  reply_is_private?: boolean;
   reply_to_message?: MessageRow | null; // For hydrated replies
   reactions_count?: Record<string, number>; // { "👍": 3, "❤️": 1 }
   user_reactions?: string[]; // ["👍", "❤️"] - reactions by current user

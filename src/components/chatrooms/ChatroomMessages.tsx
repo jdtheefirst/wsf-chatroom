@@ -82,6 +82,7 @@ import { LeaderboardItem } from "./LeaderboardItem";
 import { Howl } from "howler";
 import { ReactionNotification } from "./ReactionNotification";
 import LinkPreview from "./LinkPreviews";
+import { PrivateReplyNotification } from "./PrivateReplyNotification";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -111,13 +112,13 @@ export function ChatroomMessagesEnhanced({
   const [targetLang, setTargetLang] = useState<LanguageCode>(
     (supportedLanguages.some((lang) => lang.code === profile?.language)
       ? profile?.language
-      : "en") as LanguageCode
+      : "en") as LanguageCode,
   );
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const [isUploading, setIsUploading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"chat" | "info" | "members">(
-    "chat"
+    "chat",
   );
   const [onlineCount, setOnlineCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -132,8 +133,9 @@ export function ChatroomMessagesEnhanced({
     useState(false);
   // New states for replies and reactions
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
+  const [isPrivateReply, setIsPrivateReply] = useState(false);
   const [showReactionsPicker, setShowReactionsPicker] = useState<string | null>(
-    null
+    null,
   );
   // Auto-scroll to bottom
   const scrollToBottom = () => {
@@ -286,7 +288,7 @@ export function ChatroomMessagesEnhanced({
       setLoadingLeaderboards(true);
 
       const response = await fetch(
-        `/api/chatrooms/leaderboard?chatroomId=${chatroom.id}`
+        `/api/chatrooms/leaderboard?chatroomId=${chatroom.id}`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -297,7 +299,7 @@ export function ChatroomMessagesEnhanced({
         // Find current user's rank in all-time
         if (profile?.id && data.allTime) {
           const userIndex = data.allTime.findIndex(
-            (item: any) => item.user.id === profile.id
+            (item: any) => item.user.id === profile.id,
           );
           if (userIndex !== -1) {
             setUserRank({
@@ -325,7 +327,7 @@ export function ChatroomMessagesEnhanced({
     ) {
       // Find the message in the current messages
       const messageExists = messages.some(
-        (msg) => msg.id === highlightedMessageId
+        (msg) => msg.id === highlightedMessageId,
       );
 
       if (messageExists) {
@@ -341,7 +343,7 @@ export function ChatroomMessagesEnhanced({
             highlightedMessageRef.current.classList.add("highlight-pulse");
             setTimeout(() => {
               highlightedMessageRef.current?.classList.remove(
-                "highlight-pulse"
+                "highlight-pulse",
               );
             }, 2000);
 
@@ -350,7 +352,7 @@ export function ChatroomMessagesEnhanced({
 
             // Clear the URL parameter after successful scroll
             const newSearchParams = new URLSearchParams(
-              searchParams.toString()
+              searchParams.toString(),
             );
             newSearchParams.delete("messageId");
             router.replace(`?${newSearchParams.toString()}`, { scroll: false });
@@ -453,7 +455,7 @@ export function ChatroomMessagesEnhanced({
           const { data: userProfile } = await supabase
             .from("users_profile")
             .select(
-              "id, full_name, admission_no, avatar_url, belt_level, country_code, elite_plus, overall_performance, completed_all_programs, elite_plus_level"
+              "id, full_name, admission_no, avatar_url, belt_level, country_code, elite_plus, overall_performance, completed_all_programs, elite_plus_level",
             )
             .eq("id", newMessage.user_id)
             .single();
@@ -465,12 +467,15 @@ export function ChatroomMessagesEnhanced({
             language: newMessage.language,
             file_url: newMessage.file_url,
             reply_to: newMessage.reply_to,
+            reply_is_private: newMessage.reply_is_private || false,
             created_at: newMessage.created_at,
             translated_content: newMessage.translated_content || {},
             user_profile: userProfile || null,
             reactions_count: newMessage.reactions_count || {},
             user_reactions: [],
           };
+
+          let replied;
 
           // If this is a reply, fetch the replied message
           if (newMessage.reply_to) {
@@ -484,13 +489,27 @@ export function ChatroomMessagesEnhanced({
             country_code, elite_plus, overall_performance, 
             completed_all_programs, elite_plus_level
           )
-        `
+        `,
               )
               .eq("id", newMessage.reply_to)
               .single();
 
             if (repliedMessage) {
               messageWithUser.reply_to_message = repliedMessage as MessageRow;
+              replied = repliedMessage;
+            }
+          }
+
+          // Check if this is a private reply and current user can see it
+          if (newMessage.reply_is_private && profile?.id) {
+            // Apply client-side filtering for private replies
+            const canView =
+              newMessage.user_id === profile.id ||
+              (replied && replied.user_id === profile.id);
+
+            if (!canView) {
+              // Don't add private replies that user can't see
+              return;
             }
           }
 
@@ -499,7 +518,11 @@ export function ChatroomMessagesEnhanced({
           // Check if message is from another user and play sound
           if (messageWithUser.user_id !== profile?.id) {
             // Show notification
-            toast.info(`New message from ${userProfile?.full_name || "User"}`);
+            const notificationText = newMessage.reply_is_private
+              ? `Private reply from ${userProfile?.full_name || "User"}`
+              : `New message from ${userProfile?.full_name || "User"}`;
+
+            toast.info(notificationText);
 
             // Play sound if enabled
             playMessageSound();
@@ -517,7 +540,7 @@ export function ChatroomMessagesEnhanced({
                     icon: userProfile?.avatar_url || "/default-avatar.png",
                     tag: `message-${messageWithUser.id}`,
                     renotify: true,
-                  } as any
+                  } as any,
                 );
               }
             }
@@ -531,7 +554,7 @@ export function ChatroomMessagesEnhanced({
           leaderboardRefetchTimeout.current = setTimeout(() => {
             fetchLeaderboards();
           }, 2000);
-        }
+        },
       )
       .on(
         "postgres_changes",
@@ -554,15 +577,15 @@ export function ChatroomMessagesEnhanced({
                     ...updatedMessage,
                     reactions_count: updatedMessage.reactions_count || {},
                   }
-                : msg
-            )
+                : msg,
+            ),
           );
 
           // If reactions count changed, fetch reactions
           if (updatedMessage.reactions_count) {
             fetchAllMessageReactionsOptimized();
           }
-        }
+        },
       )
       .on(
         "postgres_changes",
@@ -574,9 +597,9 @@ export function ChatroomMessagesEnhanced({
         },
         (payload) => {
           setMessages((prev) =>
-            prev.filter((msg) => msg.id !== payload.old.id)
+            prev.filter((msg) => msg.id !== payload.old.id),
           );
-        }
+        },
       )
       .on(
         "postgres_changes",
@@ -614,7 +637,7 @@ export function ChatroomMessagesEnhanced({
                   };
                 }
                 return msg;
-              })
+              }),
             );
           } else if (payload.eventType === "DELETE") {
             const oldReaction = payload.old as any;
@@ -634,7 +657,7 @@ export function ChatroomMessagesEnhanced({
                   }
 
                   const userReactions = (msg.user_reactions || []).filter(
-                    (emoji: string) => emoji !== oldReaction.emoji
+                    (emoji: string) => emoji !== oldReaction.emoji,
                   );
 
                   return {
@@ -644,10 +667,10 @@ export function ChatroomMessagesEnhanced({
                   };
                 }
                 return msg;
-              })
+              }),
             );
           }
-        }
+        },
       )
       .subscribe();
 
@@ -668,11 +691,47 @@ export function ChatroomMessagesEnhanced({
     }
   }, [messages.length, profile?.id]);
 
+  const filterMessagesForUser = (
+    messages: MessageRow[],
+    userId: string,
+  ): MessageRow[] => {
+    return messages.filter((message) => {
+      // If not a private reply, include it
+      if (!message.reply_is_private) {
+        return true;
+      }
+
+      // If private reply, check if user can see it
+      if (!message.reply_to_message) {
+        return true; // Shouldn't happen, but include it
+      }
+
+      // User can see private reply if they are the author or the recipient
+      return (
+        message.user_id === userId ||
+        message.reply_to_message.user_id === userId
+      );
+    });
+  };
+
+  // Use this function when setting or updating messages
+  useEffect(() => {
+    if (profile?.id) {
+      const filteredMessages = filterMessagesForUser(
+        initialMessages,
+        profile.id,
+      );
+      setMessages(filteredMessages);
+    } else {
+      setMessages(initialMessages);
+    }
+  }, [initialMessages, profile?.id]);
+
   useEffect(() => {
     const hydrateMessages = async () => {
       // Check if any messages need hydration
       const needsHydration = messages.some(
-        (msg) => msg.reply_to && !msg.reply_to_message
+        (msg) => msg.reply_to && !msg.reply_to_message,
       );
 
       if (needsHydration) {
@@ -841,7 +900,7 @@ export function ChatroomMessagesEnhanced({
               status: isAway ? "away" : "online",
             });
           }
-        }
+        },
       );
       return users;
     };
@@ -887,13 +946,25 @@ export function ChatroomMessagesEnhanced({
 
   // Function to hydrate reply messages - IMPROVED VERSION
   const hydrateReplyMessages = async (messagesToHydrate: MessageRow[]) => {
+    // Filter out messages that current user can't see (private replies)
+    const visibleMessages = messagesToHydrate.filter((msg) => {
+      if (!msg.reply_is_private) return true;
+      if (!profile?.id) return false;
+
+      // User can see private reply if they are author or recipient
+      const isAuthor = msg.user_id === profile.id;
+      const isRecipient = msg.reply_to_message?.user_id === profile.id;
+
+      return isAuthor || isRecipient;
+    });
+
     // Find messages that need hydration
-    const messagesNeedingHydration = messagesToHydrate.filter(
-      (msg) => msg.reply_to && !msg.reply_to_message
+    const messagesNeedingHydration = visibleMessages.filter(
+      (msg) => msg.reply_to && !msg.reply_to_message,
     );
 
     if (messagesNeedingHydration.length === 0) {
-      return messagesToHydrate;
+      return visibleMessages;
     }
 
     try {
@@ -913,7 +984,7 @@ export function ChatroomMessagesEnhanced({
           country_code, elite_plus, overall_performance, 
           completed_all_programs, elite_plus_level
         )
-      `
+      `,
         )
         .in("id", replyIds);
 
@@ -926,7 +997,7 @@ export function ChatroomMessagesEnhanced({
       });
 
       // Hydrate the messages
-      return messagesToHydrate.map((msg) => {
+      return visibleMessages.map((msg) => {
         if (msg.reply_to && !msg.reply_to_message) {
           const repliedMessage = repliedMessagesMap.get(msg.reply_to);
           if (repliedMessage) {
@@ -940,7 +1011,7 @@ export function ChatroomMessagesEnhanced({
       });
     } catch (error) {
       console.error("Error hydrating reply messages:", error);
-      return messagesToHydrate;
+      return visibleMessages;
     }
   };
 
@@ -1005,7 +1076,7 @@ export function ChatroomMessagesEnhanced({
             reactions_count: reactionsCount,
             user_reactions: userReactionSet ? Array.from(userReactionSet) : [],
           };
-        })
+        }),
       );
     } catch (error) {
       console.error("Error fetching reactions:", error);
@@ -1051,7 +1122,7 @@ export function ChatroomMessagesEnhanced({
               }
 
               const userReactions = (msg.user_reactions || []).filter(
-                (e) => e !== emoji
+                (e) => e !== emoji,
               );
 
               return {
@@ -1061,7 +1132,7 @@ export function ChatroomMessagesEnhanced({
               };
             }
             return msg;
-          })
+          }),
         );
       } else {
         // Add reaction
@@ -1106,7 +1177,7 @@ export function ChatroomMessagesEnhanced({
               };
             }
             return msg;
-          })
+          }),
         );
       }
 
@@ -1120,6 +1191,7 @@ export function ChatroomMessagesEnhanced({
   // Function to handle reply - IMPROVED
   const handleReply = (message: MessageRow) => {
     setReplyingTo(message);
+    setIsPrivateReply(false); // Reset to default (public)
 
     // Store the username separately
     const username = message.user_profile?.full_name || "User";
@@ -1130,7 +1202,7 @@ export function ChatroomMessagesEnhanced({
       textareaRef.current?.focus();
       textareaRef.current?.setSelectionRange(
         username.length + 2, // Position after "@username "
-        username.length + 2
+        username.length + 2,
       );
       textareaRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 50);
@@ -1146,6 +1218,7 @@ export function ChatroomMessagesEnhanced({
       setInput(`@${replyingTo.user_profile?.full_name || "User"} `);
     }
     setReplyingTo(null);
+    setIsPrivateReply(false); // Reset when cancelling reply
   };
 
   // Enhanced sendMessage function with reply support
@@ -1165,10 +1238,12 @@ export function ChatroomMessagesEnhanced({
     const text = input.trim();
     const currentFile = file;
     const replyToId = replyingTo?.id;
+    const privateReply = isPrivateReply && replyToId ? true : false;
 
     setInput("");
     setFile(null);
     setReplyingTo(null);
+    setIsPrivateReply(false); // Reset after sending
 
     try {
       let fileUrl: string | null = null;
@@ -1182,7 +1257,7 @@ export function ChatroomMessagesEnhanced({
 
         const fileName = `${Date.now()}-${currentFile.name.replace(
           /[^a-zA-Z0-9.-]/g,
-          "_"
+          "_",
         )}`;
         const filePath = `chatrooms/${chatroom.id}/${fileName}`;
 
@@ -1211,6 +1286,7 @@ export function ChatroomMessagesEnhanced({
         language: profile?.language || "en",
         file_url: fileUrl,
         reply_to: replyToId,
+        reply_is_private: privateReply,
         translated_content: {},
       });
 
@@ -1231,6 +1307,7 @@ export function ChatroomMessagesEnhanced({
       setInput(text); // Restore text if error
       if (replyingTo) {
         setReplyingTo(replyingTo);
+        setIsPrivateReply(privateReply); // Restore private reply state if error
       }
     } finally {
       setSending(false);
@@ -1332,8 +1409,8 @@ export function ChatroomMessagesEnhanced({
                   [targetLang]: translated,
                 },
               }
-            : msg
-        )
+            : msg,
+        ),
       );
 
       toast.dismiss();
@@ -1472,12 +1549,12 @@ export function ChatroomMessagesEnhanced({
                       onClick={() => {
                         // Navigate to hashtag search
                         router.push(
-                          `/search?q=${encodeURIComponent(splitPart)}`
+                          `/search?q=${encodeURIComponent(splitPart)}`,
                         );
                       }}
                     >
                       {splitPart}
-                    </span>
+                    </span>,
                   );
                 } else if (pattern.toString().includes("@")) {
                   newParts.push(
@@ -1490,7 +1567,7 @@ export function ChatroomMessagesEnhanced({
                       }}
                     >
                       {splitPart}
-                    </span>
+                    </span>,
                   );
                 } else if (pattern.toString().includes("\\$")) {
                   newParts.push(
@@ -1499,7 +1576,7 @@ export function ChatroomMessagesEnhanced({
                       className="text-green-600 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 px-1.5 py-0.5 rounded"
                     >
                       {splitPart}
-                    </span>
+                    </span>,
                   );
                 } else {
                   // Important numbers
@@ -1509,7 +1586,7 @@ export function ChatroomMessagesEnhanced({
                       className="text-amber-600 dark:text-amber-400 font-semibold bg-amber-50 dark:bg-amber-900/20 px-1 rounded"
                     >
                       {splitPart}
-                    </span>
+                    </span>,
                   );
                 }
               } else {
@@ -1578,7 +1655,6 @@ export function ChatroomMessagesEnhanced({
     return [...new Set(matches)];
   };
 
-  // Add to the UI: Reply preview component
   const renderReplyPreview = () => {
     if (!replyingTo) return null;
 
@@ -1596,18 +1672,32 @@ export function ChatroomMessagesEnhanced({
           <div className="mb-1">
             <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
               Replying to {replyingTo.user_profile?.full_name || "User"}
+              {isPrivateReply && (
+                <Badge variant="outline" className="ml-2 text-xs py-0 h-5">
+                  <Shield className="h-3 w-3 mr-1" />
+                  Private
+                </Badge>
+              )}
             </span>
           </div>
           <div className="text-sm text-blue-600 dark:text-blue-400">
-            {/* Container with truncation */}
             <div className="truncate">{displayedText}</div>
+          </div>
 
-            {/* Show full text on hover (optional) */}
-            {shouldTruncate && (
-              <div className="absolute invisible group-hover:visible z-10 mt-1 max-w-md p-2 bg-white dark:bg-gray-900 border rounded shadow-lg text-xs">
-                {replyText}
-              </div>
-            )}
+          {/* Private reply toggle */}
+          <div className="mt-2 flex items-center gap-2">
+            <label className="flex items-center gap-2 text-xs cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isPrivateReply}
+                onChange={(e) => setIsPrivateReply(e.target.checked)}
+                className="h-3 w-3 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span className="text-muted-foreground">
+                Send as private reply (only visible to you and{" "}
+                {replyingTo.user_profile?.full_name || "them"})
+              </span>
+            </label>
           </div>
         </div>
 
@@ -1625,6 +1715,7 @@ export function ChatroomMessagesEnhanced({
               setInput("");
             }
             setReplyingTo(null);
+            setIsPrivateReply(false);
           }}
           className="h-7 w-7 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/30 flex-shrink-0"
           title="Cancel reply"
@@ -1635,19 +1726,24 @@ export function ChatroomMessagesEnhanced({
     );
   };
 
-  // Add to the message render function: Reply indicator
   const renderReplyIndicator = (message: MessageRow) => {
     if (!message.reply_to || !message.reply_to_message) return null;
 
     const repliedMessage = message.reply_to_message;
+    const isPrivate = message.reply_is_private;
 
     return (
       <div
-        className="mb-2 p-2 rounded-lg bg-muted/50 border-l-2 border-primary cursor-pointer hover:bg-muted transition-colors"
+        className={cn(
+          "mb-2 p-2 rounded-lg border-l-2 cursor-pointer hover:bg-muted transition-colors",
+          isPrivate
+            ? "bg-purple-50 dark:bg-purple-900/20 border-purple-500 dark:border-purple-400"
+            : "bg-muted/50 border-primary",
+        )}
         onClick={() => {
           // Scroll to the replied message
           const repliedElement = document.getElementById(
-            `message-${repliedMessage.id}`
+            `message-${repliedMessage.id}`,
           );
           if (repliedElement) {
             repliedElement.scrollIntoView({
@@ -1666,6 +1762,15 @@ export function ChatroomMessagesEnhanced({
           <span className="font-medium">
             Replying to {repliedMessage.user_profile?.full_name || "User"}
           </span>
+          {isPrivate && (
+            <Badge
+              variant="outline"
+              className="ml-1 text-[10px] py-0 px-1.5 h-4"
+            >
+              <Shield className="h-2.5 w-2.5 mr-0.5" />
+              Private
+            </Badge>
+          )}
         </div>
         <div className="text-sm truncate">
           {repliedMessage.content.length > 50
@@ -1675,7 +1780,6 @@ export function ChatroomMessagesEnhanced({
       </div>
     );
   };
-
   // In your message render function, update the reactions section:
   const renderReactions = (message: MessageRow) => {
     if (
@@ -1691,7 +1795,7 @@ export function ChatroomMessagesEnhanced({
             onClick={(e) => {
               e.stopPropagation();
               setShowReactionsPicker(
-                showReactionsPicker === message.id ? null : message.id
+                showReactionsPicker === message.id ? null : message.id,
               );
             }}
           >
@@ -1714,7 +1818,7 @@ export function ChatroomMessagesEnhanced({
                 "h-7 px-2 rounded-full text-xs gap-1",
                 message.user_reactions?.includes(emoji)
                   ? "bg-primary/10 border-primary/30"
-                  : "bg-background"
+                  : "bg-background",
               )}
               onClick={() => toggleReaction(message.id, emoji)}
             >
@@ -1730,7 +1834,7 @@ export function ChatroomMessagesEnhanced({
           onClick={(e) => {
             e.stopPropagation();
             setShowReactionsPicker(
-              showReactionsPicker === message.id ? null : message.id
+              showReactionsPicker === message.id ? null : message.id,
             );
           }}
         >
@@ -1785,9 +1889,17 @@ export function ChatroomMessagesEnhanced({
   // Update the message actions dropdown to include Reply option
   const renderMessageActions = (
     message: MessageRow,
-    isCurrentUser: boolean
+    isCurrentUser: boolean,
   ) => (
     <DropdownMenuContent align="end" className="w-48 rounded-xl">
+      {message.reply_is_private && (
+        <div className="px-2 py-1.5 text-xs text-muted-foreground border-b mb-1">
+          <div className="flex items-center gap-1.5">
+            <Shield className="h-3 w-3" />
+            <span>Private reply</span>
+          </div>
+        </div>
+      )}
       <DropdownMenuItem
         onClick={() => handleReply(message)}
         className="cursor-pointer rounded-lg"
@@ -1798,7 +1910,7 @@ export function ChatroomMessagesEnhanced({
       <DropdownMenuItem
         onClick={() => {
           router.push(
-            `https://www.worldsamma.org/students/${message.user_profile?.admission_no}`
+            `https://www.worldsamma.org/students/${message.user_profile?.admission_no}`,
           );
         }}
         className="cursor-pointer rounded-lg"
@@ -1862,6 +1974,7 @@ export function ChatroomMessagesEnhanced({
         profileId={profile?.id!}
         playMessageSound={playReactionSound}
       />
+      <PrivateReplyNotification supabase={supabase} profileId={profile?.id!} />
       {/* Header - Fixed & Responsive */}
       <div className="flex-shrink-0 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b bg-card/50 backdrop-blur-sm">
         <div className="flex items-center gap-2 sm:gap-4">
@@ -2148,7 +2261,7 @@ export function ChatroomMessagesEnhanced({
 
                       const eliteLevel = message.user_profile?.elite_plus
                         ? getElitePlusLevelInfo(
-                            message.user_profile.elite_plus_level || 0
+                            message.user_profile.elite_plus_level || 0,
                           )
                         : null;
 
@@ -2159,12 +2272,12 @@ export function ChatroomMessagesEnhanced({
                       const progressPercentage =
                         message.user_profile?.belt_level !== undefined
                           ? getProgressPercentage(
-                              message.user_profile.belt_level
+                              message.user_profile.belt_level,
                             )
                           : 0;
 
                       const expertiseLevel = getCurrentProgram(
-                        message.user_profile?.belt_level || 0
+                        message.user_profile?.belt_level || 0,
                       );
 
                       const isMaxLevel =
@@ -2183,7 +2296,7 @@ export function ChatroomMessagesEnhanced({
                             message.user_id === profile?.id
                               ? "bg-primary/5 border border-primary/10"
                               : "bg-card border border-border/50",
-                            isHighlighted && "highlighted-message"
+                            isHighlighted && "highlighted-message",
                           )}
                         >
                           {/* Message content with highlight indicator */}
@@ -2245,7 +2358,7 @@ export function ChatroomMessagesEnhanced({
                                   />
                                   <AvatarFallback className="bg-gradient-to-br from-primary/20 to-primary/10 text-primary font-semibold rounded-xl text-xs">
                                     {getInitials(
-                                      message.user_profile?.full_name ?? null
+                                      message.user_profile?.full_name ?? null,
                                     )}
                                   </AvatarFallback>
                                 </Avatar>
@@ -2266,7 +2379,7 @@ export function ChatroomMessagesEnhanced({
 
                               {/* Online Status Indicator */}
                               {onlineUsers.find(
-                                (user) => user.id === message.user_profile?.id
+                                (user) => user.id === message.user_profile?.id,
                               ) && (
                                 <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border border-background"></div>
                               )}
@@ -2285,7 +2398,7 @@ export function ChatroomMessagesEnhanced({
                                   <span className="text-xs text-muted-foreground whitespace-nowrap">
                                     {formatDistanceToNow(
                                       new Date(message.created_at),
-                                      { addSuffix: true }
+                                      { addSuffix: true },
                                     )}
                                   </span>
                                 </div>
@@ -2443,7 +2556,7 @@ export function ChatroomMessagesEnhanced({
                                 <span className="text-xs text-muted-foreground whitespace-nowrap">
                                   {formatDistanceToNow(
                                     new Date(message.created_at),
-                                    { addSuffix: true }
+                                    { addSuffix: true },
                                   )}
                                 </span>
 
@@ -2461,7 +2574,7 @@ export function ChatroomMessagesEnhanced({
                                     </DropdownMenuTrigger>
                                     {renderMessageActions(
                                       message,
-                                      isCurrentUser
+                                      isCurrentUser,
                                     )}
                                   </DropdownMenu>
                                 </div>
@@ -3142,7 +3255,7 @@ export function ChatroomMessagesEnhanced({
                           return (b.belt_level || 0) - (a.belt_level || 0);
                         })
                         .map((user) =>
-                          renderUserCard(user, user.status === "online")
+                          renderUserCard(user, user.status === "online"),
                         )}
                     </div>
                   )}
@@ -3173,7 +3286,7 @@ export function ChatroomMessagesEnhanced({
                           return (b.belt_level || 0) - (a.belt_level || 0);
                         })
                         .map((user) =>
-                          renderUserCard(user, user.status === "online")
+                          renderUserCard(user, user.status === "online"),
                         )}
                     </div>
                   )}
@@ -3193,7 +3306,7 @@ export function ChatroomMessagesEnhanced({
                         const count = onlineUsers.filter((user) => {
                           const belt = getBeltInfo(user.belt_level || 0);
                           const program = getCurrentProgram(
-                            user.belt_level || 0
+                            user.belt_level || 0,
                           );
                           return program.title === level;
                         }).length;
@@ -3222,7 +3335,7 @@ export function ChatroomMessagesEnhanced({
                             </div>
                           </div>
                         );
-                      }
+                      },
                     )}
                   </div>
                 </div>
@@ -3253,8 +3366,8 @@ export function ChatroomMessagesEnhanced({
                         ? Math.round(
                             onlineUsers.reduce(
                               (acc, user) => acc + (user.belt_level || 0),
-                              0
-                            ) / onlineUsers.length
+                              0,
+                            ) / onlineUsers.length,
                           )
                         : 0}
                     </div>
