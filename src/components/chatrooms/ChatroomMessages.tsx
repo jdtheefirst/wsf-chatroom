@@ -128,22 +128,21 @@ export function ChatroomMessagesEnhanced({
   const chatTitle = getChatroomTitle(chatroom.type);
   const router = useRouter();
   const highlightedMessageRef = useRef<HTMLDivElement>(null);
-  // Add a state to track if we've already scrolled to the highlighted message
+  // State to track if we've already scrolled to the highlighted message
   const [hasScrolledToHighlighted, setHasScrolledToHighlighted] =
     useState(false);
-  // New states for replies and reactions
+
+  // States for replies and reactions
   const [replyingTo, setReplyingTo] = useState<MessageRow | null>(null);
   const [isPrivateReply, setIsPrivateReply] = useState(false);
   const [showReactionsPicker, setShowReactionsPicker] = useState<string | null>(
     null,
   );
-  // Auto-scroll to bottom
-  const scrollToBottom = () => {
-    // Only auto-scroll if there's no highlighted message to jump to
-    if (!highlightedMessageId || hasScrolledToHighlighted) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  };
+
+  const [showScrollButton, setShowScrollButton] = useState(true);
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
   const [dailyLeaderboard, setDailyLeaderboard] = useState<any[]>([]);
   const [weeklyLeaderboard, setWeeklyLeaderboard] = useState<any[]>([]);
   const [allTimeLeaderboard, setAllTimeLeaderboard] = useState<any[]>([]);
@@ -159,6 +158,80 @@ export function ChatroomMessagesEnhanced({
   // Add a different sound for reactions
   const [reactionSound, setReactionSound] = useState<Howl | null>(null);
   const audioPermissionRef = useRef(false);
+
+  // Only auto-scroll if there's no highlighted message to jump to
+  // OR if we have already scrolled to the highlighted message (to allow auto-scrolling on new messages after jumping)
+  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior,
+      });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
+
+    setShowScrollButton(false);
+    setIsUserScrolledUp(false);
+  };
+
+  // Auto-scroll on new messages only if user hasn't scrolled up
+  useEffect(() => {
+    // Only auto-scroll if:
+    // 1. User hasn't manually scrolled up
+    // 2. No highlighted message to jump to, OR we've already scrolled to it
+    if (
+      !isUserScrolledUp &&
+      (!highlightedMessageId || hasScrolledToHighlighted)
+    ) {
+      scrollToBottom("auto"); // Use "auto" for instant scroll on new messages
+    }
+
+    if (chatroom?.id) {
+      fetchLeaderboards();
+    }
+
+    return () => {
+      if (leaderboardRefetchTimeout.current) {
+        clearTimeout(leaderboardRefetchTimeout.current);
+      }
+    };
+  }, [messages, chatroom?.id, isUserScrolledUp]); // Add isUserScrolledUp dependency
+
+  // IntersectionObserver to detect when bottom is visible
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    const bottomSentinel = bottomSentinelRef.current;
+
+    if (!container || !bottomSentinel) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          // If the bottom sentinel is visible, we're at the bottom
+          const isAtBottom = entry.isIntersecting;
+          setIsUserScrolledUp(!isAtBottom);
+          setShowScrollButton(!isAtBottom);
+        });
+      },
+      {
+        root: container,
+        threshold: 0.1,
+        rootMargin: "0px",
+      },
+    );
+
+    observer.observe(bottomSentinel);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  // Reset highlighted scroll state when highlightedMessageId changes
+  useEffect(() => {
+    setHasScrolledToHighlighted(false);
+  }, [highlightedMessageId]);
 
   // Load sound and check permission on component mount
   useEffect(() => {
@@ -369,28 +442,6 @@ export function ChatroomMessagesEnhanced({
     searchParams,
     router,
   ]);
-
-  // Original auto-scroll effect - MODIFIED
-  useEffect(() => {
-    // Only auto-scroll on new messages if we haven't specifically scrolled to a highlighted message
-    if (!hasScrolledToHighlighted) {
-      scrollToBottom();
-    }
-
-    if (chatroom?.id) {
-      fetchLeaderboards();
-    }
-    return () => {
-      if (leaderboardRefetchTimeout.current) {
-        clearTimeout(leaderboardRefetchTimeout.current);
-      }
-    };
-  }, [messages, chatroom?.id]);
-
-  // Reset highlighted scroll state when highlightedMessageId changes
-  useEffect(() => {
-    setHasScrolledToHighlighted(false);
-  }, [highlightedMessageId]);
 
   // Update the shareMessage function
   const shareMessage = async (messageId: string) => {
@@ -2216,7 +2267,10 @@ export function ChatroomMessagesEnhanced({
             className="flex-1 min-h-0 flex flex-col mt-0 p-0 overflow-hidden"
           >
             {/* Scrollable Messages Area */}
-            <div className="flex-1 min-h-0 overflow-y-auto">
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 min-h-0 overflow-y-auto scroll-smooth"
+            >
               {messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center p-2 sm:p-8">
                   <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 flex items-center justify-center mb-6">
@@ -2731,7 +2785,40 @@ export function ChatroomMessagesEnhanced({
                       );
                     })}
                     <div ref={messagesEndRef} />
+                    {/* Sentinel div for intersection detection */}
+                    <div ref={bottomSentinelRef} className="h-1 w-full" />
                   </div>
+                </div>
+              )}
+
+              {/* Scroll to Bottom Button */}
+
+              {showScrollButton && messages.length > 0 && (
+                <div className="sticky bottom-4 flex justify-center pointer-events-none">
+                  <Button
+                    onClick={() => scrollToBottom("smooth")}
+                    size="sm"
+                    className="rounded-full shadow-lg bg-primary hover:bg-primary/90 text-primary-foreground pointer-events-auto animate-in fade-in slide-in-from-bottom-2 duration-300"
+                    variant="default"
+                  >
+                    <ChevronDown className="h-4 w-4 mr-1" />
+                    <span className="hidden sm:inline">Scroll to bottom</span>
+                    <span className="sm:hidden">New messages</span>
+                    {messages.filter(
+                      (m) =>
+                        new Date(m.created_at) > new Date(Date.now() - 60000),
+                    ).length > 0 && (
+                      <span className="ml-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-medium">
+                        {
+                          messages.filter(
+                            (m) =>
+                              new Date(m.created_at) >
+                              new Date(Date.now() - 60000),
+                          ).length
+                        }
+                      </span>
+                    )}
+                  </Button>
                 </div>
               )}
             </div>

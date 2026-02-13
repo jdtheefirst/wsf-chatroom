@@ -190,6 +190,10 @@ body {
   background-color: rgba(59, 130, 246, 0.1) !important;
 }
 
+.scroll-smooth {
+  scroll-behavior: smooth !important;
+}
+
 /* Smooth transitions for reactions */
 .reaction-button {
   transition: all 0.2s ease;
