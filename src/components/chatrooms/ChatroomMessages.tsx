@@ -2677,14 +2677,14 @@ export function ChatroomMessagesEnhanced({
                               )}
 
                               {message.file_url &&
-                                fileUrls[message.file_url] && (
+                                fileUrls[message.file_url!] && (
                                   <div className="mt-3 w-full">
                                     <button
                                       onClick={async () => {
                                         try {
                                           // Fetch the file
                                           const response = await fetch(
-                                            fileUrls[message.file_url],
+                                            fileUrls[message.file_url!],
                                           );
                                           const blob = await response.blob();
 
@@ -2695,7 +2695,7 @@ export function ChatroomMessagesEnhanced({
                                             document.createElement("a");
                                           link.href = url;
                                           link.download =
-                                            message.file_url.split("/").pop() ||
+                                            message.file_url?.split("/").pop() ||
                                             "download";
                                           document.body.appendChild(link);
                                           link.click();
