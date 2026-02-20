@@ -1310,10 +1310,10 @@ export function ChatroomMessagesEnhanced({
           /[^a-zA-Z0-9.-]/g,
           "_",
         )}`;
-        const filePath = `chatrooms/${chatroom.id}/${fileName}`;
+        const filePath = `${chatroom.id}/${profile.id}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
-          .from("chat_uploads")
+          .from("chat-attachments")
           .upload(filePath, currentFile, {
             cacheControl: "3600",
             upsert: false,
@@ -1323,9 +1323,10 @@ export function ChatroomMessagesEnhanced({
 
         const {
           data: { publicUrl },
-        } = supabase.storage.from("chat_uploads").getPublicUrl(filePath);
+        } = supabase.storage.from("chat-attachments").getPublicUrl(filePath);
 
         fileUrl = filePath;
+        console.log("File uploaded to Supabase Storage:", publicUrl);
         setFileUrls((prev) => ({ ...prev, [filePath]: publicUrl }));
       }
 
@@ -2675,14 +2676,38 @@ export function ChatroomMessagesEnhanced({
                                 </div>
                               )}
 
-                              {/* File Attachment - Full width */}
                               {message.file_url &&
                                 fileUrls[message.file_url] && (
                                   <div className="mt-3 w-full">
-                                    <a
-                                      href={fileUrls[message.file_url]}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
+                                    <button
+                                      onClick={async () => {
+                                        try {
+                                          // Fetch the file
+                                          const response = await fetch(
+                                            fileUrls[message.file_url],
+                                          );
+                                          const blob = await response.blob();
+
+                                          // Create download link
+                                          const url =
+                                            window.URL.createObjectURL(blob);
+                                          const link =
+                                            document.createElement("a");
+                                          link.href = url;
+                                          link.download =
+                                            message.file_url.split("/").pop() ||
+                                            "download";
+                                          document.body.appendChild(link);
+                                          link.click();
+                                          document.body.removeChild(link);
+                                          window.URL.revokeObjectURL(url);
+                                        } catch (error) {
+                                          console.error(
+                                            "Download failed:",
+                                            error,
+                                          );
+                                        }
+                                      }}
                                       className="inline-flex items-center gap-3 rounded-xl bg-gradient-to-r from-muted/80 to-muted/50 px-4 py-3 text-sm hover:from-muted hover:to-muted/80 transition-all duration-200 border border-border/50 hover:border-border group w-full"
                                     >
                                       <div className="p-2 rounded-lg bg-background/80 group-hover:bg-background flex-shrink-0">
@@ -2697,7 +2722,7 @@ export function ChatroomMessagesEnhanced({
                                         </div>
                                       </div>
                                       <Download className="h-4 w-4 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                                    </a>
+                                    </button>
                                   </div>
                                 )}
 
