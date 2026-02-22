@@ -56,6 +56,7 @@ import {
   BookOpen,
   ImageIcon,
   Play,
+  FileText,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -777,6 +778,26 @@ export function ChatroomMessagesEnhanced({
       setMessages(initialMessages);
     }
   }, [initialMessages, profile?.id]);
+
+  // After fetching messages
+  useEffect(() => {
+    const urls: Record<string, string> = {};
+
+    messages.forEach((message) => {
+      if (message.file_url) {
+        // Generate public URL for each file
+        const {
+          data: { publicUrl },
+        } = supabase.storage
+          .from("chat-attachments")
+          .getPublicUrl(message.file_url);
+
+        urls[message.file_url] = publicUrl;
+      }
+    });
+
+    setFileUrls(urls);
+  }, [messages]);
 
   useEffect(() => {
     const hydrateMessages = async () => {
@@ -2677,52 +2698,137 @@ export function ChatroomMessagesEnhanced({
                               )}
 
                               {message.file_url &&
-                                fileUrls[message.file_url!] && (
+                                fileUrls[message.file_url] && (
                                   <div className="mt-3 w-full">
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          // Fetch the file
-                                          const response = await fetch(
-                                            fileUrls[message.file_url!],
-                                          );
-                                          const blob = await response.blob();
+                                    {(() => {
+                                      const fileName =
+                                        message.file_url.split("/").pop() || "";
+                                      const fileExtension =
+                                        fileName
+                                          .split(".")
+                                          .pop()
+                                          ?.toLowerCase() || "";
+                                      const isImage = [
+                                        "jpg",
+                                        "jpeg",
+                                        "png",
+                                        "gif",
+                                        "webp",
+                                        "svg",
+                                      ].includes(fileExtension);
+                                      const publicUrl =
+                                        fileUrls[message.file_url];
 
-                                          // Create download link
-                                          const url =
-                                            window.URL.createObjectURL(blob);
-                                          const link =
-                                            document.createElement("a");
-                                          link.href = url;
-                                          link.download =
-                                            message.file_url?.split("/").pop() ||
-                                            "download";
-                                          document.body.appendChild(link);
-                                          link.click();
-                                          document.body.removeChild(link);
-                                          window.URL.revokeObjectURL(url);
-                                        } catch (error) {
-                                          console.error(
-                                            "Download failed:",
-                                            error,
-                                          );
-                                        }
-                                      }}
-                                      className="inline-flex items-center gap-3 rounded-xl bg-gradient-to-r from-muted/80 to-muted/50 px-4 py-3 text-sm hover:from-muted hover:to-muted/80 transition-all duration-200 border border-border/50 hover:border-border group w-full"
-                                    >
-                                      <div className="p-2 rounded-lg bg-background/80 group-hover:bg-background flex-shrink-0">
-                                        <File className="h-5 w-5" />
-                                      </div>
-                                      <div className="flex-1 min-w-0">
-                                        <div className="font-medium truncate">
-                                          {message.file_url.split("/").pop()}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">
-                                          Click to download
-                                        </div>
-                                      </div>
-                                      <Download className="h-4 w-4 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
-                                    </button>
+                                      if (isImage) {
+                                        // Display image directly
+                                        return (
+                                          <div className="space-y-2">
+                                            <img
+                                              src={publicUrl}
+                                              alt={fileName}
+                                              className="max-w-full rounded-lg max-h-96 object-contain cursor-pointer hover:opacity-90 transition-opacity"
+                                              onClick={() =>
+                                                window.open(publicUrl, "_blank")
+                                              }
+                                              onError={(e) => {
+                                                console.error(
+                                                  "Image failed to load:",
+                                                  publicUrl,
+                                                );
+                                                e.currentTarget.style.display =
+                                                  "none";
+                                              }}
+                                            />
+                                            <button
+                                              onClick={async () => {
+                                                try {
+                                                  const response =
+                                                    await fetch(publicUrl);
+                                                  const blob =
+                                                    await response.blob();
+                                                  const url =
+                                                    window.URL.createObjectURL(
+                                                      blob,
+                                                    );
+                                                  const link =
+                                                    document.createElement("a");
+                                                  link.href = url;
+                                                  link.download = fileName;
+                                                  document.body.appendChild(
+                                                    link,
+                                                  );
+                                                  link.click();
+                                                  document.body.removeChild(
+                                                    link,
+                                                  );
+                                                  window.URL.revokeObjectURL(
+                                                    url,
+                                                  );
+                                                } catch (error) {
+                                                  console.error(
+                                                    "Download failed:",
+                                                    error,
+                                                  );
+                                                }
+                                              }}
+                                              className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mt-2"
+                                            >
+                                              <Download className="h-4 w-4" />
+                                              Download {fileName}
+                                            </button>
+                                          </div>
+                                        );
+                                      }
+
+                                      // For non-images (PDFs, docs, etc.) - show download button
+                                      return (
+                                        <button
+                                          onClick={async () => {
+                                            try {
+                                              const response =
+                                                await fetch(publicUrl);
+                                              const blob =
+                                                await response.blob();
+                                              const url =
+                                                window.URL.createObjectURL(
+                                                  blob,
+                                                );
+                                              const link =
+                                                document.createElement("a");
+                                              link.href = url;
+                                              link.download = fileName;
+                                              document.body.appendChild(link);
+                                              link.click();
+                                              document.body.removeChild(link);
+                                              window.URL.revokeObjectURL(url);
+                                            } catch (error) {
+                                              console.error(
+                                                "Download failed:",
+                                                error,
+                                              );
+                                            }
+                                          }}
+                                          className="inline-flex items-center gap-3 rounded-xl bg-gradient-to-r from-muted/80 to-muted/50 px-4 py-3 text-sm hover:from-muted hover:to-muted/80 transition-all duration-200 border border-border/50 hover:border-border group w-full"
+                                        >
+                                          <div className="p-2 rounded-lg bg-background/80 group-hover:bg-background flex-shrink-0">
+                                            {fileExtension === "pdf" ? (
+                                              <FileText className="h-5 w-5" />
+                                            ) : (
+                                              <File className="h-5 w-5" />
+                                            )}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="font-medium truncate">
+                                              {fileName}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground">
+                                              Click to download
+                                            </div>
+                                          </div>
+                                          <Download className="h-4 w-4 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
+                                        </button>
+                                      );
+                                    })()}
                                   </div>
                                 )}
 
