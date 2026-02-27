@@ -57,6 +57,7 @@ import {
   ImageIcon,
   Play,
   FileText,
+  Megaphone,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -84,6 +85,7 @@ import { Howl } from "howler";
 import { ReactionNotification } from "./ReactionNotification";
 import LinkPreview from "./LinkPreviews";
 import { PrivateReplyNotification } from "./PrivateReplyNotification";
+import { BroadcastComposer } from "./BroadcastComposer";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -159,6 +161,76 @@ export function ChatroomMessagesEnhanced({
   // Add a different sound for reactions
   const [reactionSound, setReactionSound] = useState<Howl | null>(null);
   const audioPermissionRef = useRef(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [oldestMessageDate, setOldestMessageDate] = useState<string | null>(
+    null,
+  );
+
+  // Add this function to load more messages
+  const loadMoreMessages = async () => {
+    if (!supabase || loadingMore || !hasMoreMessages) return;
+
+    setLoadingMore(true);
+    try {
+      const oldestDate = oldestMessageDate || messages[0]?.created_at;
+
+      if (!oldestDate) {
+        setHasMoreMessages(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("messages")
+        .select(
+          `
+        *,
+        user_profile:users_profile!messages_user_id_fkey (*)
+      `,
+        )
+        .eq("chatroom_id", chatroom.id)
+        .lt("created_at", oldestDate)
+        .order("created_at", { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      if (data && data.length > 0) {
+        // Filter out private replies that user can't see
+        const filteredData = profile?.id
+          ? filterMessagesForUser(data as MessageRow[], profile.id)
+          : (data as MessageRow[]);
+
+        setMessages((prev) => [...filteredData.reverse(), ...prev]);
+
+        if (data.length < 50) {
+          setHasMoreMessages(false);
+        }
+      } else {
+        setHasMoreMessages(false);
+      }
+    } catch (error) {
+      console.error("Error loading more messages:", error);
+      toast.error("Failed to load more messages");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Add scroll listener for infinite scroll
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (container.scrollTop < 100 && hasMoreMessages && !loadingMore) {
+        loadMoreMessages();
+      }
+    };
+
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [hasMoreMessages, loadingMore]);
 
   // Only auto-scroll if there's no highlighted message to jump to
   // OR if we have already scrolled to the highlighted message (to allow auto-scrolling on new messages after jumping)
@@ -507,7 +579,7 @@ export function ChatroomMessagesEnhanced({
           const { data: userProfile } = await supabase
             .from("users_profile")
             .select(
-              "id, full_name, admission_no, avatar_url, belt_level, country_code, elite_plus, overall_performance, completed_all_programs, elite_plus_level",
+              "id, full_name, admission_no, avatar_url, belt_level, country_code, elite_plus, overall_performance, completed_all_programs, elite_plus_level, is_wsf",
             )
             .eq("id", newMessage.user_id)
             .single();
@@ -539,7 +611,7 @@ export function ChatroomMessagesEnhanced({
           user_profile:users_profile!messages_user_id_fkey (
             id, full_name, admission_no, avatar_url, belt_level, 
             country_code, elite_plus, overall_performance, 
-            completed_all_programs, elite_plus_level
+            completed_all_programs, elite_plus_level, is_wsf
           )
         `,
               )
@@ -838,6 +910,7 @@ export function ChatroomMessagesEnhanced({
           overall_performance: profile.overall_performance,
           completed_all_programs: profile.completed_all_programs,
           elite_plus_level: profile.elite_plus_level,
+          is_wsf: profile.is_wsf,
         };
 
         if (!userData) {
@@ -901,6 +974,7 @@ export function ChatroomMessagesEnhanced({
                     overall_performance: userData.overall_performance,
                     completed_all_programs: userData.completed_all_programs,
                     elite_plus_level: userData.elite_plus_level,
+                    is_wsf: userData.is_wsf,
                     online_at: new Date().toISOString(),
                   });
                   processAndUpdate();
@@ -952,6 +1026,7 @@ export function ChatroomMessagesEnhanced({
             const completed_all_programs = presence.completed_all_programs;
             const elite_plus_level = presence.elite_plus_level;
             const online_at = presence.online_at;
+            const is_wsf = presence.is_wsf;
 
             const lastSeen = online_at ? new Date(online_at).getTime() : now;
 
@@ -968,6 +1043,7 @@ export function ChatroomMessagesEnhanced({
               overall_performance,
               completed_all_programs,
               elite_plus_level,
+              is_wsf,
               last_seen: lastSeen,
               status: isAway ? "away" : "online",
             });
@@ -1054,7 +1130,7 @@ export function ChatroomMessagesEnhanced({
         user_profile:users_profile!messages_user_id_fkey (
           id, full_name, admission_no, avatar_url, belt_level, 
           country_code, elite_plus, overall_performance, 
-          completed_all_programs, elite_plus_level
+          completed_all_programs, elite_plus_level, is_wsf
         )
       `,
         )
@@ -2096,6 +2172,10 @@ export function ChatroomMessagesEnhanced({
 
         {/* Right Side Controls - Responsive layout */}
         <div className="flex items-center gap-2">
+          {/* Add Broadcast Composer for WSF user */}
+          {profile?.is_wsf && (
+            <BroadcastComposer className="hidden sm:inline-flex" />
+          )}
           {/* Language Selector - Hide on small mobile */}
           <div className="hidden sm:block">
             <Select
@@ -2141,6 +2221,13 @@ export function ChatroomMessagesEnhanced({
               <Globe className="h-4 w-4" />
             </Button>
           </div>
+
+          {/* Mobile Broadcast Button */}
+          {profile?.is_wsf && (
+            <div className="sm:hidden">
+              <BroadcastComposer />
+            </div>
+          )}
 
           {/* Share Button - Hide on mobile */}
           {shareable && (
@@ -2326,6 +2413,14 @@ export function ChatroomMessagesEnhanced({
               ) : (
                 <div className="p-2 sm:p-6">
                   <div className="max-w-4xl mx-auto space-y-4">
+                    {loadingMore && (
+                      <div className="py-4 text-center">
+                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          Loading more messages...
+                        </p>
+                      </div>
+                    )}
                     {messages.map((message) => {
                       // Check if this is the highlighted message
                       const isHighlighted = message.id === highlightedMessageId;
@@ -2361,6 +2456,7 @@ export function ChatroomMessagesEnhanced({
                         beltOptions.length - 1;
 
                       const isCurrentUser = message.user_id === profile?.id;
+                      const isBroadcast = message.user_profile?.is_wsf;
 
                       return (
                         <div
@@ -2373,8 +2469,20 @@ export function ChatroomMessagesEnhanced({
                               ? "bg-primary/5 border border-primary/10"
                               : "bg-card border border-border/50",
                             isHighlighted && "highlighted-message",
+                            isBroadcast &&
+                              "bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/20 dark:to-blue-950/20 border-purple-200 dark:border-purple-800/30",
                           )}
                         >
+                          {/* Broadcast Indicator */}
+                          {isBroadcast && (
+                            <div className="absolute -top-2 left-4">
+                              <Badge className="bg-gradient-to-r from-purple-600 to-blue-600 text-white border-0 shadow-lg">
+                                <Megaphone className="h-3 w-3 mr-1" />
+                                WSF Broadcast
+                              </Badge>
+                            </div>
+                          )}
+
                           {/* Message content with highlight indicator */}
                           {isHighlighted && (
                             <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-1/2">

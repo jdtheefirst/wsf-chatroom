@@ -25,7 +25,7 @@ interface AuthContextType {
   loading: boolean;
   signIn: (
     email: string,
-    password: string
+    password: string,
   ) => Promise<{ error: AuthError | null }>;
   signInWithMagicLink: (email: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -93,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           years_of_training: data.years_of_training,
           specializations: data.specializations,
           elite_plus_level: data.elite_plus_level,
+          is_wsf: data.is_wsf,
         };
         setProfile(profileData);
         setLoading(false);
@@ -170,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (error: any) {
         console.error(
           "[AuthContext] Error checking initial auth state:",
-          error
+          error,
         );
         if (mountedRef.current) {
           setLoading(false);
@@ -200,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (error.status === 429) {
             return {
               error: new Error(
-                "Too many attempts. Please wait a few minutes."
+                "Too many attempts. Please wait a few minutes.",
               ) as AuthError,
             };
           }
@@ -218,7 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: error as AuthError };
       }
     },
-    [fetchUserRole]
+    [fetchUserRole],
   );
 
   const signInWithMagicLink = useCallback(async (email: string) => {
@@ -304,7 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithTwitter,
       signOut,
       supabase, // Include in dependencies
-    ]
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

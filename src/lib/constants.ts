@@ -156,6 +156,7 @@ export const getNextBelt = (currentLevel: number) => {
 // possible types: "wsf_fans", "wsf_students", "wsf_club_owners", "psa", "nsa", "wsf_committee"
 export const chatrooms = [
   {
+    uid: "b67cfe8c-8694-401b-8d77-fec1b824cbab",
     id: "wsf_fans",
     title: "WSF Fans Chat",
     visibility: "public",
@@ -165,6 +166,7 @@ export const chatrooms = [
     color: "bg-blue-500",
   },
   {
+    uid: "c243ec14-ed94-49c5-9900-5572c840f764",
     id: "wsf_students",
     title: "WSF Students Chat",
     visibility: "private",
@@ -174,6 +176,7 @@ export const chatrooms = [
     color: "bg-green-500",
   },
   {
+    uid: null,
     id: "wsf_club_owners",
     title: "WSF Club Owners Chat",
     visibility: "private",
@@ -183,6 +186,7 @@ export const chatrooms = [
     color: "bg-purple-500",
   },
   {
+    uid: null,
     id: "psa",
     title: "Professional Staff Association Chat",
     visibility: "private",
@@ -192,6 +196,7 @@ export const chatrooms = [
     color: "bg-red-500",
   },
   {
+    uid: null,
     id: "nsa",
     title: "National Staff Association Chat",
     visibility: "private",
@@ -206,6 +211,7 @@ export const chatrooms = [
     color: "bg-yellow-500",
   },
   {
+    uid: "fe30b7bc-31cc-4c5f-ab94-41fcbd5708c1",
     id: "wsf_committee",
     title: "WSF Committee Chat",
     visibility: "private",

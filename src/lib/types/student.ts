@@ -9,7 +9,7 @@ export const StudentSchema = z
       .max(30, "Referrer must be under 30 characters")
       .regex(
         /^[a-z0-9_]+$/,
-        "Only lowercase letters, numbers, and underscores allowed"
+        "Only lowercase letters, numbers, and underscores allowed",
       )
       .optional()
       .or(z.literal("")),
@@ -65,6 +65,7 @@ export interface ProfileData {
   years_of_training?: number;
   specializations?: string[];
   elite_plus_level?: string;
+  is_wsf?: boolean;
 }
 
 export interface ClubMembership {

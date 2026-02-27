@@ -9,6 +9,7 @@ export type PresenceUser = {
   overall_performance?: string;
   completed_all_programs?: boolean;
   elite_plus_level?: number;
+  is_wsf?: boolean;
   last_seen: number; // Unix timestamp
   status: "online" | "away" | "offline";
 };

@@ -34,6 +34,7 @@ export type UserProfile = {
   overall_performance?: string | null;
   completed_all_programs?: boolean;
   elite_plus_level?: number | null;
+  is_wsf?: boolean;
 };
 
 export type MessageRow = {
