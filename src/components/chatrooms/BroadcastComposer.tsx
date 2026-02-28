@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -41,10 +41,14 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
-  // Return rooms with uid; these are the ones we want to show in the broadcast composer
+
+  // ✅ FIXED: Single declaration, using UIDs only
   const [selectedRooms, setSelectedRooms] = useState<string[]>(
-    chatrooms.filter((r) => r.uid !== null).map((r) => r.uid),
+    chatrooms.filter((r) => r.uid !== null).map((r) => r.uid as string),
   );
+
+  const committeeRoom = chatrooms.find((r) => r.id === "wsf_committee");
+
   const [file, setFile] = useState<File | null>(null);
   const [scheduleForLater, setScheduleForLater] = useState(false);
   const [scheduledTime, setScheduledTime] = useState<string>("");
@@ -52,6 +56,34 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
     "normal" | "urgent" | "announcement"
   >("normal");
 
+  // Get all chatrooms from database
+  useEffect(() => {
+    const fetchChatrooms = async () => {
+      const { data, error } = await supabase.from("chatrooms").select("*");
+
+      if (error) {
+        console.error("Error fetching chatrooms:", error);
+        return;
+      }
+      // Update chatrooms with UIDs
+      setSelectedRooms(
+        data.filter((r) => r.id !== null).map((r) => r.id as string),
+      );
+    };
+
+    fetchChatrooms();
+  }, [supabase]);
+
+  // ✅ FIXED: Use uid, not id
+  const toggleRoom = (roomUid: string | null) => {
+    if (!roomUid) return;
+
+    setSelectedRooms((prev) =>
+      prev.includes(roomUid)
+        ? prev.filter((id) => id !== roomUid)
+        : [...prev, roomUid],
+    );
+  };
   const isWSFUser = profile?.is_wsf;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -67,16 +99,11 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
     setFile(selectedFile);
   };
 
-  const toggleRoom = (roomId: string) => {
-    setSelectedRooms((prev) =>
-      prev.includes(roomId)
-        ? prev.filter((id) => id !== roomId)
-        : [...prev, roomId],
-    );
-  };
-
+  // ✅ FIXED: Use only UIDs
   const selectAllRooms = () => {
-    setSelectedRooms(chatrooms.map((r) => r.id));
+    setSelectedRooms(
+      chatrooms.filter((r) => r.uid !== null).map((r) => r.uid as string),
+    );
   };
 
   const clearAllRooms = () => {
@@ -104,30 +131,45 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
     try {
       let fileUrl: string | null = null;
 
-      // Upload file if present
+      // Upload file if present - USE SAME PATTERN AS sendMessage
       if (file) {
-        const fileName = `broadcast/${Date.now()}-${file.name.replace(
-          /[^a-zA-Z0-9.-]/g,
-          "_",
-        )}`;
+        const fileSizeMB = file.size / (1024 * 1024);
+        if (fileSizeMB > 10) {
+          throw new Error("File size exceeds 10MB limit");
+        }
+
+        // Create a safe filename
+        const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const filePath = `${committeeRoom?.uid}/${profile.id}/${safeFileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("chat-attachments")
-          .upload(fileName, file);
+          .upload(filePath, file, {
+            cacheControl: "3600",
+            upsert: false,
+          });
 
         if (uploadError) throw uploadError;
 
-        fileUrl = fileName;
+        // Store just the path, not the full URL
+        fileUrl = filePath;
+
+        console.log("File uploaded to Supabase Storage:", filePath);
       }
 
+      // Then insert messages with the filePath
       for (const roomId of selectedRooms) {
         const { error } = await supabase.from("messages").insert({
           user_id: profile?.id,
           chatroom_id: roomId,
-          content: content,
-          language: "en", // Default to English for broadcasts
-          file_url: fileUrl || null,
+          content: content || (file ? "(File attached)" : ""),
+          language: "en",
+          file_url: fileUrl, // Just store the path, same as sendMessage
           translated_content: {},
+          is_broadcast: true,
+          priority,
+          scheduled_at:
+            scheduleForLater && scheduledTime ? new Date(scheduledTime) : null,
         });
 
         if (error) {
@@ -167,14 +209,11 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
-          variant="default"
-          className={cn(
-            "gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700",
-            className,
-          )}
+          variant="outline"
+          size={"icon"}
+          className={cn("border-none shadow-none", className)}
         >
           <Megaphone className="h-4 w-4" />
-          <span className="hidden sm:inline">WSF Broadcast</span>
         </Button>
       </DialogTrigger>
 
@@ -243,23 +282,28 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
                 </Button>
               </div>
             </div>
+            {/* Room Selection - FIXED UI */}
             <div className="grid grid-cols-2 gap-2">
               {chatrooms.map((room) => (
                 <Button
                   key={room.id}
                   type="button"
                   variant={
-                    selectedRooms.includes(room.id) ? "default" : "outline"
+                    room.uid && selectedRooms.includes(room.uid)
+                      ? "default"
+                      : "outline"
                   }
-                  className={cn(
-                    "justify-start gap-2",
-                    selectedRooms.includes(room.id) && "bg-primary/90",
-                  )}
-                  onClick={() => toggleRoom(room.id)}
+                  className="justify-start gap-2"
+                  onClick={() => toggleRoom(room.uid)}
                   disabled={!room.uid}
                 >
                   <Users className="h-4 w-4" />
                   <span className="truncate">{room.title}</span>
+                  {!room.uid && (
+                    <Badge variant="outline" className="ml-auto text-xs">
+                      No UID
+                    </Badge>
+                  )}
                 </Button>
               ))}
             </div>

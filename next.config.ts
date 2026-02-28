@@ -1,3 +1,4 @@
+// next.config.ts
 import { withSentryConfig } from "@sentry/nextjs";
 import { withBotId } from "botid/next/config";
 /** @type {import('next').NextConfig} */

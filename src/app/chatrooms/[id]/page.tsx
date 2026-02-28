@@ -37,6 +37,9 @@ const getChatroomData = cache(async (id: string) => {
       reply_to,
       reply_is_private,
       reactions_count,
+      priority,
+      is_broadcast,
+      scheduled_at,
       user_profile:users_profile!messages_user_id_fkey (
         id,
         full_name,
@@ -47,7 +50,8 @@ const getChatroomData = cache(async (id: string) => {
         elite_plus,
         overall_performance,
         completed_all_programs,
-        elite_plus_level
+        elite_plus_level,
+        is_wsf
       )
     `,
     )
@@ -97,7 +101,8 @@ const getChatroomData = cache(async (id: string) => {
           elite_plus,
           overall_performance,
           completed_all_programs,
-          elite_plus_level
+          elite_plus_level,
+          is_wsf
         )
       `,
       )

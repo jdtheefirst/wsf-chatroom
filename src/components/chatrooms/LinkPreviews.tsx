@@ -26,13 +26,12 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({ url }) => {
       setError(false);
 
       try {
-        // Check cache first
+        // Check cache first (same as before)
         const cacheKey = `link-preview-${btoa(url)}`;
         const cached = localStorage.getItem(cacheKey);
 
         if (cached) {
           const cachedData = JSON.parse(cached);
-          // Use cache if less than 1 hour old
           if (Date.now() - cachedData.timestamp < 3600000) {
             setPreview(cachedData.data);
             setLoading(false);
@@ -40,19 +39,16 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({ url }) => {
           }
         }
 
-        // Fetch new preview
-        const data = await getLinkPreview(url, {
-          timeout: 5000,
-          headers: {
-            "user-agent":
-              "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-            accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "accept-language": "en-US,en;q=0.9",
-            "cache-control": "max-age=0",
-          },
-          followRedirects: "follow",
-        });
+        // Fetch through your API endpoint
+        const response = await fetch(
+          `/api/link-preview?url=${encodeURIComponent(url)}`,
+        );
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch preview");
+        }
+
+        const data = await response.json();
 
         // Cache the result
         localStorage.setItem(
@@ -60,7 +56,7 @@ const LinkPreview: React.FC<LinkPreviewProps> = ({ url }) => {
           JSON.stringify({
             data,
             timestamp: Date.now(),
-          })
+          }),
         );
 
         setPreview(data);

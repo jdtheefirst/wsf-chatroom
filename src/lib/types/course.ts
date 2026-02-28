@@ -1,7 +1,4 @@
 // types/course.ts
-
-import { number } from "zod";
-
 export interface Video {
   id: string;
   title: string;
@@ -128,7 +125,7 @@ export type CourseWithAssessment = Course & {
 
 // Type guard to check if course has assessment criteria
 export function hasAssessmentCriteria(
-  course: Course
+  course: Course,
 ): course is CourseWithAssessment {
   return (
     "assessment_criteria" in course && course.assessment_criteria !== undefined
@@ -138,7 +135,7 @@ export function hasAssessmentCriteria(
 // Helper function to get course by slug
 export function getCourseBySlug(
   courses: Course[],
-  slug: string
+  slug: string,
 ): Course | undefined {
   return courses.find((course) => course.slug === slug);
 }
@@ -146,7 +143,7 @@ export function getCourseBySlug(
 // Helper function to get courses by level
 export function getCoursesByLevel(
   courses: Course[],
-  level: CourseLevel
+  level: CourseLevel,
 ): Course[] {
   return courses.filter((course) => course.level === level);
 }
@@ -159,14 +156,14 @@ export function getFeaturedCourses(courses: Course[]): Course[] {
 // Helper function to get prerequisite chain
 export function getPrerequisiteChain(
   courses: Course[],
-  targetCourse: Course
+  targetCourse: Course,
 ): Course[] {
   const chain: Course[] = [];
   let currentCourse: Course | null = targetCourse;
 
   while (currentCourse && currentCourse.prerequisite_course_id) {
     const prerequisite = courses.find(
-      (c) => c.id === currentCourse!.prerequisite_course_id
+      (c) => c.id === currentCourse!.prerequisite_course_id,
     );
     if (prerequisite) {
       chain.unshift(prerequisite);

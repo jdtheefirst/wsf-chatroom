@@ -136,7 +136,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="scroll-smooth">
+    <html lang="en" className="scroll-smooth" data-scroll-behavior="smooth">
       <head>
         {/* Basic favicon */}
         <link rel="icon" href="/favicon.ico" sizes="any" />
@@ -215,7 +215,7 @@ export default function RootLayout({
           "min-h-screen bg-background font-sans text-foreground antialiased",
           "overscroll-none", // Prevent pull-to-refresh on mobile
           geistSans.variable,
-          geistMono.variable
+          geistMono.variable,
         )}
         suppressHydrationWarning
       >

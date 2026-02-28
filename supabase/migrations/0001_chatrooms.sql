@@ -9,6 +9,11 @@ create type public.chatroom_type as enum (
   'wsf_committee'
 );
 
+-- create priority enum for broadcasts
+create type public.broadcast_priority as enum (
+  "normal" | "urgent" | "announcement"
+);
+
 create table if not exists public.chatrooms (
   id uuid primary key default gen_random_uuid(),
   type chatroom_type not null,
@@ -46,6 +51,12 @@ create table if not exists public.messages (
   file_url text,
   created_at timestamptz not null default now()
 );
+
+-- add priority, is_broadcast, and scheduled_at columns to messages for broadcast functionality
+ALTER TABLE public.messages
+ADD COLUMN IF NOT EXISTS priority public.broadcast_priority DEFAULT 'normal',
+ADD COLUMN IF NOT EXISTS is_broadcast boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS scheduled_at timestamptz;
 
 -- Note: Changed p_country_code parameter from char(2) to text to handle NULL
 CREATE OR REPLACE FUNCTION get_or_create_chatroom(
@@ -110,6 +121,7 @@ alter table public.chatroom_members enable row level security;
 alter table public.messages enable row level security;
 
 -- Helper: check membership
+-- users_profile.is_wsf is also any chatroom member
 create or replace function public.is_chat_member(p_chatroom_id uuid, p_user_id uuid)
 returns boolean
 language sql
@@ -160,6 +172,24 @@ create policy "Messages read fans public" on public.messages
     or public.is_chat_member(messages.chatroom_id, auth.uid())
     or auth.role() = 'service_role'
   );
+
+-- Helper: check membership based on users_profile.is_wsf
+-- Either they're a regular member OR they're a WSF user
+create or replace function public.is_chat_member(p_chatroom_id uuid, p_user_id uuid)
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1 from public.chatroom_members m
+    join public.users_profile p on p.id = m.user_id
+    where m.chatroom_id = p_chatroom_id
+      and m.user_id = p_user_id
+      and (
+        m.status = 'active' OR p.is_wsf = true
+      )
+  );
+$$;
 
 -- Messages insert: active members only (or service role)
 create policy "Messages insert by members" on public.messages

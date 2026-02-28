@@ -51,6 +51,9 @@ export type MessageRow = {
   reply_to_message?: MessageRow | null; // For hydrated replies
   reactions_count?: Record<string, number>; // { "👍": 3, "❤️": 1 }
   user_reactions?: string[]; // ["👍", "❤️"] - reactions by current user
+  priority?: "normal" | "urgent" | "announcement";
+  is_broadcast?: boolean;
+  scheduled_at?: string | null;
 };
 
 // Add Reaction type

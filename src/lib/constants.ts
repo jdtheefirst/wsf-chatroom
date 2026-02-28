@@ -233,3 +233,32 @@ export const getChatroomTitle = (type: ChatroomType) => {
   const room = chatrooms.find((room) => room.id === type);
   return room ? room.title : "Unknown Chatroom";
 };
+
+export const getPriorityBadge = (priority: string) => {
+  switch (priority) {
+    case "urgent":
+      return {
+        color: "bg-red-500",
+        icon: "⚡",
+        label: "URGENT",
+        className:
+          "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+      };
+    case "announcement":
+      return {
+        color: "bg-blue-500",
+        icon: "📢",
+        label: "ANNOUNCEMENT",
+        className:
+          "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
+      };
+    default:
+      return {
+        color: "bg-gray-500",
+        icon: "📌",
+        label: "NORMAL",
+        className:
+          "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+      };
+  }
+};

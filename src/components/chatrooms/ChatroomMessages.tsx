@@ -58,6 +58,7 @@ import {
   Play,
   FileText,
   Megaphone,
+  Verified,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -73,6 +74,7 @@ import {
   getCurrentProgram,
   getElitePlusLevelInfo,
   getNextBelt,
+  getPriorityBadge,
   getProgressPercentage,
 } from "@/lib/constants";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui/select";
@@ -597,6 +599,9 @@ export function ChatroomMessagesEnhanced({
             user_profile: userProfile || null,
             reactions_count: newMessage.reactions_count || {},
             user_reactions: [],
+            priority: newMessage.priority || "normal",
+            is_broadcast: newMessage.is_broadcast || false,
+            scheduled_at: newMessage.scheduled_at || null,
           };
 
           let replied;
@@ -1530,6 +1535,8 @@ export function ChatroomMessagesEnhanced({
     try {
       const { error } = await deleteMessage(supabase, messageId);
       if (error) throw error;
+      // Optimistically update UI
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
       toast.success("Message deleted");
     } catch (err) {
       toast.error("Failed to delete message");
@@ -2125,8 +2132,8 @@ export function ChatroomMessagesEnhanced({
       />
       <PrivateReplyNotification supabase={supabase} profileId={profile?.id!} />
       {/* Header - Fixed & Responsive */}
-      <div className="flex-shrink-0 flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b bg-card/50 backdrop-blur-sm">
-        <div className="flex items-center gap-2 sm:gap-4">
+      <div className="flex-shrink-0 flex items-center justify-between px-2 sm:px-6 py-3 sm:py-4 border-b bg-card/50 backdrop-blur-sm">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           {/* Logo/Avatar - Always visible */}
           <div className="relative">
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-primary/20 to-primary/10 flex items-center justify-center">
@@ -2171,7 +2178,7 @@ export function ChatroomMessagesEnhanced({
         </div>
 
         {/* Right Side Controls - Responsive layout */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           {/* Add Broadcast Composer for WSF user */}
           {profile?.is_wsf && (
             <BroadcastComposer className="hidden sm:inline-flex" />
@@ -2207,50 +2214,11 @@ export function ChatroomMessagesEnhanced({
             </Select>
           </div>
 
-          {/* Mobile Language Button */}
-          <div className="sm:hidden">
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-9 w-9 rounded-lg"
-              onClick={() => {
-                /* Open language menu */
-              }}
-              title="Change Language"
-            >
-              <Globe className="h-4 w-4" />
-            </Button>
-          </div>
-
           {/* Mobile Broadcast Button */}
           {profile?.is_wsf && (
             <div className="sm:hidden">
               <BroadcastComposer />
             </div>
-          )}
-
-          {/* Share Button - Hide on mobile */}
-          {shareable && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 rounded-lg hidden md:inline-flex"
-            >
-              <Share2 className="h-4 w-4" />
-              <span className="hidden lg:inline">Share</span>
-            </Button>
-          )}
-
-          {/* Share Icon for Mobile */}
-          {shareable && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="rounded-lg md:hidden"
-              title="Share Room"
-            >
-              <Share2 className="h-4 w-4" />
-            </Button>
           )}
 
           {/* Menu Button - Always visible */}
@@ -2456,7 +2424,7 @@ export function ChatroomMessagesEnhanced({
                         beltOptions.length - 1;
 
                       const isCurrentUser = message.user_id === profile?.id;
-                      const isBroadcast = message.user_profile?.is_wsf;
+                      const isBroadcast = message.is_broadcast;
 
                       return (
                         <div
@@ -2464,7 +2432,7 @@ export function ChatroomMessagesEnhanced({
                           ref={isHighlighted ? highlightedMessageRef : null}
                           id={`message-${message.id}`}
                           className={cn(
-                            "group flex flex-col sm:flex-row gap-3 sm:gap-4 p-4 rounded-2xl transition-all duration-200 hover:bg-muted/30 w-full",
+                            "relative group flex flex-col sm:flex-row gap-3 sm:gap-4 p-4 rounded-2xl transition-all duration-200 hover:bg-muted/30 w-full",
                             message.user_id === profile?.id
                               ? "bg-primary/5 border border-primary/10"
                               : "bg-card border border-border/50",
@@ -2473,13 +2441,37 @@ export function ChatroomMessagesEnhanced({
                               "bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/20 dark:to-blue-950/20 border-purple-200 dark:border-purple-800/30",
                           )}
                         >
-                          {/* Broadcast Indicator */}
-                          {isBroadcast && (
-                            <div className="absolute -top-2 left-4">
-                              <Badge className="bg-gradient-to-r from-purple-600 to-blue-600 text-white border-0 shadow-lg">
-                                <Megaphone className="h-3 w-3 mr-1" />
-                                WSF Broadcast
-                              </Badge>
+                          {/* Broadcast Indicator with Priority */}
+                          {message.is_broadcast && (
+                            <div className="absolute -top-2 left-4 flex flex-wrap gap-2">
+                              {/* Priority Badge */}
+                              {message.priority &&
+                                message.priority !== "normal" && (
+                                  <Badge
+                                    className={cn(
+                                      "border-0 shadow-lg",
+                                      getPriorityBadge(message.priority)
+                                        .className,
+                                    )}
+                                  >
+                                    <span className="mr-1">
+                                      {getPriorityBadge(message.priority).icon}
+                                    </span>
+                                    {getPriorityBadge(message.priority).label}
+                                  </Badge>
+                                )}
+
+                              {/* Scheduled Badge */}
+                              {message.scheduled_at &&
+                                new Date(message.scheduled_at) > new Date() && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-background/80 backdrop-blur-sm"
+                                  >
+                                    <Clock className="h-3 w-3 mr-1" />
+                                    Scheduled
+                                  </Badge>
+                                )}
                             </div>
                           )}
 
@@ -2573,12 +2565,17 @@ export function ChatroomMessagesEnhanced({
                             <div className="flex-1 min-w-0 sm:hidden">
                               <div className="flex flex-col w-full">
                                 <div className="flex items-center justify-between w-full mb-1">
-                                  <span className="font-semibold text-sm truncate">
-                                    {isCurrentUser
-                                      ? "You"
-                                      : message.user_profile?.full_name ||
-                                        "Anonymous User"}
-                                  </span>
+                                  <div className="font-semibold text-sm truncate gap-2 flex items-center">
+                                    <span>
+                                      {isCurrentUser
+                                        ? "You"
+                                        : message.user_profile?.full_name ||
+                                          "Anonymous User"}
+                                    </span>
+                                    {message.user_profile?.is_wsf && (
+                                      <Verified className="h-3 w-3 text-blue-800" />
+                                    )}
+                                  </div>
                                   <span className="text-xs text-muted-foreground whitespace-nowrap">
                                     {formatDistanceToNow(
                                       new Date(message.created_at),
@@ -2633,11 +2630,17 @@ export function ChatroomMessagesEnhanced({
                               <div className="flex flex-col gap-1 flex-1">
                                 {/* User Info with Belt Progress */}
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-semibold text-sm">
-                                    {isCurrentUser
-                                      ? "You"
-                                      : message.user_profile?.full_name ||
-                                        "Anonymous User"}
+                                  <span className="flex items-center font-semibold text-sm">
+                                    <>
+                                      {isCurrentUser
+                                        ? "You"
+                                        : message.user_profile?.full_name ||
+                                          "Anonymous User"}
+                                    </>
+                                    &nbsp;
+                                    {message.user_profile?.is_wsf && (
+                                      <Verified className="h-3 w-3 text-blue-800" />
+                                    )}
                                   </span>
 
                                   {beltInfo && (
@@ -2672,6 +2675,18 @@ export function ChatroomMessagesEnhanced({
                                         </Badge>
                                       )}
                                     </>
+                                  )}
+
+                                  {/* Show priority dot for all broadcast messages */}
+                                  {message.is_broadcast && (
+                                    <div
+                                      className={cn(
+                                        "w-2 h-2 rounded-full",
+                                        getPriorityBadge(
+                                          message.priority || "normal",
+                                        ).color,
+                                      )}
+                                    />
                                   )}
                                 </div>
 
@@ -3031,7 +3046,6 @@ export function ChatroomMessagesEnhanced({
               )}
 
               {/* Scroll to Bottom Button */}
-
               {showScrollButton && messages.length > 0 && (
                 <div className="sticky bottom-4 flex justify-center pointer-events-none">
                   <Button
