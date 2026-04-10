@@ -1,5 +1,4 @@
 // components/chatrooms/BroadcastComposer.tsx
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -27,6 +26,12 @@ import {
   Paperclip,
   Shield,
   Users,
+  AlertTriangle,
+  Bell,
+  Clock,
+  CheckCircle2,
+  Globe,
+  Mail,
 } from "lucide-react";
 import { useAuth } from "@/lib/context/AuthContext";
 import { cn } from "@/lib/utils";
@@ -34,72 +39,89 @@ import { chatrooms } from "@/lib/constants";
 
 interface BroadcastComposerProps {
   className?: string;
+  onBroadcastSent?: () => void;
 }
 
-export function BroadcastComposer({ className }: BroadcastComposerProps) {
+// Priority configuration
+const PRIORITY_CONFIG = {
+  normal: {
+    label: "Normal",
+    description: "Regular broadcast with push notifications",
+    color: "bg-primary",
+    icon: Megaphone,
+    badgeClass: "badge-normal",
+  },
+  announcement: {
+    label: "Announcement",
+    description: "High priority with email + push notifications",
+    color: "bg-blue-500",
+    icon: Bell,
+    badgeClass: "badge-announcement",
+  },
+  urgent: {
+    label: "Urgent",
+    description: "Critical - immediate email + push notifications",
+    color: "bg-red-500",
+    icon: AlertTriangle,
+    badgeClass: "badge-urgent",
+  },
+};
+
+export function BroadcastComposer({
+  className,
+  onBroadcastSent,
+}: BroadcastComposerProps) {
   const { profile, supabase } = useAuth();
   const [open, setOpen] = useState(false);
   const [content, setContent] = useState("");
   const [sending, setSending] = useState(false);
-
-  // ✅ FIXED: Single declaration, using UIDs only
   const [selectedRooms, setSelectedRooms] = useState<string[]>(
     chatrooms.filter((r) => r.uid !== null).map((r) => r.uid as string),
   );
-
-  const committeeRoom = chatrooms.find((r) => r.id === "wsf_committee");
-
   const [file, setFile] = useState<File | null>(null);
   const [scheduleForLater, setScheduleForLater] = useState(false);
   const [scheduledTime, setScheduledTime] = useState<string>("");
   const [priority, setPriority] = useState<
     "normal" | "urgent" | "announcement"
   >("normal");
+  const [rateLimitRemaining, setRateLimitRemaining] = useState<number | null>(
+    null,
+  );
+  const [broadcastStats, setBroadcastStats] = useState<{
+    totalMembers?: number;
+    pushSent?: number;
+    emailsSent?: number;
+  } | null>(null);
 
-  // Get all chatrooms from database
+  // Get database chatrooms
   useEffect(() => {
     const fetchChatrooms = async () => {
       const { data, error } = await supabase.from("chatrooms").select("*");
-
       if (error) {
         console.error("Error fetching chatrooms:", error);
         return;
       }
-      // Update chatrooms with UIDs
-      setSelectedRooms(
-        data.filter((r) => r.id !== null).map((r) => r.id as string),
-      );
+      if (data && data.length > 0) {
+        setSelectedRooms(
+          data.filter((r) => r.id !== null).map((r) => r.id as string),
+        );
+      }
     };
-
     fetchChatrooms();
   }, [supabase]);
 
-  // ✅ FIXED: Use uid, not id
+  const isWSFUser = profile?.is_wsf;
+  const committeeRoom = chatrooms.find((r) => r.id === "wsf_committee");
+
   const toggleRoom = (roomUid: string | null) => {
     if (!roomUid) return;
-
     setSelectedRooms((prev) =>
       prev.includes(roomUid)
         ? prev.filter((id) => id !== roomUid)
         : [...prev, roomUid],
     );
   };
-  const isWSFUser = profile?.is_wsf;
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (!selectedFile) return;
-
-    const fileSizeMB = selectedFile.size / (1024 * 1024);
-    if (fileSizeMB > 10) {
-      toast.error("File size must be less than 10MB");
-      return;
-    }
-
-    setFile(selectedFile);
-  };
-
-  // ✅ FIXED: Use only UIDs
   const selectAllRooms = () => {
     setSelectedRooms(
       chatrooms.filter((r) => r.uid !== null).map((r) => r.uid as string),
@@ -108,6 +130,40 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
 
   const clearAllRooms = () => {
     setSelectedRooms([]);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+    const fileSizeMB = selectedFile.size / (1024 * 1024);
+    if (fileSizeMB > 10) {
+      toast.error("File size must be less than 10MB");
+      return;
+    }
+    setFile(selectedFile);
+  };
+
+  // Check rate limit before sending
+  const checkRateLimit = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/broadcast/rate-limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      setRateLimitRemaining(data.remaining);
+      if (!data.allowed) {
+        toast.error(
+          `Rate limit exceeded. You can send ${data.remaining || 0} more broadcasts today.`,
+        );
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.error("Rate limit check failed:", error);
+      return true; // Allow on error
+    }
   };
 
   const handleSendBroadcast = async () => {
@@ -126,21 +182,22 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
       return;
     }
 
+    // Check rate limit for non-WSF users or based on priority
+    if (priority === "urgent" || priority === "announcement") {
+      const allowed = await checkRateLimit();
+      if (!allowed) return;
+    }
+
     setSending(true);
+    setBroadcastStats(null);
 
     try {
       let fileUrl: string | null = null;
 
-      // Upload file if present - USE SAME PATTERN AS sendMessage
+      // Upload file if present
       if (file) {
-        const fileSizeMB = file.size / (1024 * 1024);
-        if (fileSizeMB > 10) {
-          throw new Error("File size exceeds 10MB limit");
-        }
-
-        // Create a safe filename
         const safeFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
-        const filePath = `${committeeRoom?.uid}/${profile.id}/${safeFileName}`;
+        const filePath = `${committeeRoom?.uid || "broadcast"}/${profile.id}/${Date.now()}_${safeFileName}`;
 
         const { error: uploadError } = await supabase.storage
           .from("chat-attachments")
@@ -150,37 +207,110 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
           });
 
         if (uploadError) throw uploadError;
-
-        // Store just the path, not the full URL
         fileUrl = filePath;
-
-        console.log("File uploaded to Supabase Storage:", filePath);
       }
 
-      // Then insert messages with the filePath
+      const broadcastResults = [];
+
+      // Send to each selected room
       for (const roomId of selectedRooms) {
-        const { error } = await supabase.from("messages").insert({
-          user_id: profile?.id,
-          chatroom_id: roomId,
-          content: content || (file ? "(File attached)" : ""),
-          language: "en",
-          file_url: fileUrl, // Just store the path, same as sendMessage
-          translated_content: {},
-          is_broadcast: true,
-          priority,
-          scheduled_at:
-            scheduleForLater && scheduledTime ? new Date(scheduledTime) : null,
-        });
+        // Insert broadcast message
+        const { data: message, error: insertError } = await supabase
+          .from("messages")
+          .insert({
+            user_id: profile.id,
+            chatroom_id: roomId,
+            content: content.trim() || (file ? "(File attached)" : ""),
+            language: profile.language || "en",
+            file_url: fileUrl,
+            translated_content: {},
+            is_broadcast: true,
+            priority: priority,
+            scheduled_at:
+              scheduleForLater && scheduledTime
+                ? new Date(scheduledTime)
+                : null,
+          })
+          .select()
+          .single();
 
-        if (error) {
-          console.error(`Error inserting into room ${roomId}:`, error);
-          throw new Error(`Failed to send to room ${roomId}`);
+        if (insertError) throw insertError;
+
+        // If not scheduled, trigger notifications immediately
+        if (!scheduleForLater) {
+          const notificationResponse = await fetch(
+            "/api/pwa/send-notification",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                message: {
+                  id: message.id,
+                  content: content.trim(),
+                  user_id: profile.id,
+                  user_name: profile.full_name,
+                  user_avatar: profile.avatar_url,
+                },
+                chatroomId: roomId,
+                priority: priority,
+              }),
+            },
+          );
+
+          const result = await notificationResponse.json();
+          broadcastResults.push({
+            roomId,
+            stats: result.stats,
+          });
+
+          if (result.stats) {
+            setBroadcastStats(result.stats);
+          }
         }
+
+        // Small delay between rooms to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
 
-      toast.success(`Broadcast sent to all rooms!`);
+      // Show success message with stats
+      const totalMembers = broadcastResults.reduce(
+        (sum, r) => sum + (r.stats?.totalMembers || 0),
+        0,
+      );
+      const totalPush = broadcastResults.reduce(
+        (sum, r) => sum + (r.stats?.pushSent || 0),
+        0,
+      );
+      const totalEmails = broadcastResults.reduce(
+        (sum, r) => sum + (r.stats?.emailsSent || 0),
+        0,
+      );
+
+      if (scheduleForLater) {
+        toast.success(
+          `Broadcast scheduled for ${new Date(scheduledTime).toLocaleString()}`,
+        );
+      } else {
+        toast.success(`Broadcast sent to ${selectedRooms.length} room(s)!`, {
+          description:
+            priority !== "normal"
+              ? `📨 ${totalPush} push notifications • ✉️ ${totalEmails} emails sent`
+              : `📨 ${totalPush} push notifications sent`,
+          duration: 5000,
+        });
+      }
+
+      // Reset form
       setContent("");
       setFile(null);
+      setScheduleForLater(false);
+      setScheduledTime("");
+      setPriority("normal");
+
+      if (onBroadcastSent) {
+        onBroadcastSent();
+      }
+
       setOpen(false);
     } catch (error: any) {
       console.error("Broadcast error:", error);
@@ -194,16 +324,8 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
     return null;
   }
 
-  const getPriorityColor = () => {
-    switch (priority) {
-      case "urgent":
-        return "bg-red-500";
-      case "announcement":
-        return "bg-blue-500";
-      default:
-        return "bg-primary";
-    }
-  };
+  const priorityConfig = PRIORITY_CONFIG[priority];
+  const PriorityIcon = priorityConfig.icon;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -217,7 +339,7 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[650px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-xl">
             <Megaphone className="h-5 w-5 text-purple-500" />
@@ -228,8 +350,15 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
             </Badge>
           </DialogTitle>
           <DialogDescription>
-            Send an announcement to multiple chatrooms simultaneously. This
-            message will appear as a broadcast in all selected rooms.
+            Send an announcement to multiple chatrooms simultaneously.
+            {priority !== "normal" && (
+              <span className="block mt-1 text-amber-600 dark:text-amber-400">
+                ⚠️{" "}
+                {priority === "urgent"
+                  ? "Urgent broadcasts send push notifications AND emails to all members immediately."
+                  : "Announcements send high-priority notifications to all members."}
+              </span>
+            )}
           </DialogDescription>
         </DialogHeader>
 
@@ -237,26 +366,34 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
           {/* Priority Selection */}
           <div className="space-y-2">
             <Label>Priority Level</Label>
-            <div className="flex gap-2">
-              {(["normal", "announcement", "urgent"] as const).map((p) => (
-                <Button
-                  key={p}
-                  type="button"
-                  variant={priority === p ? "default" : "outline"}
-                  className={cn(
-                    "flex-1 capitalize",
-                    priority === p && {
-                      "bg-primary": p === "normal",
-                      "bg-blue-500 hover:bg-blue-600": p === "announcement",
-                      "bg-red-500 hover:bg-red-600": p === "urgent",
-                    },
-                  )}
-                  onClick={() => setPriority(p)}
-                >
-                  {p}
-                </Button>
-              ))}
+            <div className="grid grid-cols-3 gap-2">
+              {(["normal", "announcement", "urgent"] as const).map((p) => {
+                const config = PRIORITY_CONFIG[p];
+                const Icon = config.icon;
+                return (
+                  <Button
+                    key={p}
+                    type="button"
+                    variant={priority === p ? "default" : "outline"}
+                    className={cn(
+                      "flex flex-col gap-1 h-auto py-3",
+                      priority === p && {
+                        "bg-primary": p === "normal",
+                        "bg-blue-500 hover:bg-blue-600": p === "announcement",
+                        "bg-red-500 hover:bg-red-600": p === "urgent",
+                      },
+                    )}
+                    onClick={() => setPriority(p)}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="text-xs capitalize">{config.label}</span>
+                  </Button>
+                );
+              })}
             </div>
+            <p className="text-xs text-muted-foreground">
+              {priorityConfig.description}
+            </p>
           </div>
 
           {/* Room Selection */}
@@ -282,8 +419,7 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
                 </Button>
               </div>
             </div>
-            {/* Room Selection - FIXED UI */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto p-1">
               {chatrooms.map((room) => (
                 <Button
                   key={room.id}
@@ -297,8 +433,8 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
                   onClick={() => toggleRoom(room.uid)}
                   disabled={!room.uid}
                 >
-                  <Users className="h-4 w-4" />
-                  <span className="truncate">{room.title}</span>
+                  <Globe className="h-4 w-4 flex-shrink-0" />
+                  <span className="truncate text-sm">{room.title}</span>
                   {!room.uid && (
                     <Badge variant="outline" className="ml-auto text-xs">
                       No UID
@@ -331,10 +467,10 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
             <Label>Attachment (Optional)</Label>
             {file ? (
               <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border">
-                <div className="flex items-center gap-2">
-                  <File className="h-4 w-4" />
-                  <div>
-                    <p className="text-sm font-medium">{file.name}</p>
+                <div className="flex items-center gap-2 min-w-0">
+                  <File className="h-4 w-4 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{file.name}</p>
                     <p className="text-xs text-muted-foreground">
                       {(file.size / 1024).toFixed(1)} KB
                     </p>
@@ -350,7 +486,7 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
                 </Button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <input
                   type="file"
                   id="broadcast-file"
@@ -382,7 +518,10 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
               checked={scheduleForLater}
               onCheckedChange={setScheduleForLater}
             />
-            <Label htmlFor="schedule">Schedule for later</Label>
+            <Label htmlFor="schedule" className="flex items-center gap-2">
+              <Clock className="h-3 w-3" />
+              Schedule for later
+            </Label>
           </div>
 
           {scheduleForLater && (
@@ -397,21 +536,35 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
             </div>
           )}
 
+          {/* Rate Limit Info */}
+          {rateLimitRemaining !== null && priority !== "normal" && (
+            <div className="text-xs text-muted-foreground text-center">
+              Remaining {priority} broadcasts today: {rateLimitRemaining}
+            </div>
+          )}
+
           {/* Preview Section */}
           {content && (
             <div className="space-y-2">
               <Label>Preview</Label>
               <div className="p-4 rounded-lg border bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/20 dark:to-blue-950/20">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   <div
-                    className={cn("w-2 h-2 rounded-full", getPriorityColor())}
+                    className={cn("w-2 h-2 rounded-full", priorityConfig.color)}
                   />
                   <span className="text-xs font-medium uppercase">
-                    {priority}
+                    {priorityConfig.label}
                   </span>
                   <Badge variant="outline" className="text-xs">
-                    Broadcast to {selectedRooms.length} rooms
+                    Broadcast to {selectedRooms.length} room
+                    {selectedRooms.length !== 1 ? "s" : ""}
                   </Badge>
+                  {priority !== "normal" && (
+                    <Badge variant="secondary" className="text-xs">
+                      <Mail className="h-3 w-3 mr-1" />
+                      Email included
+                    </Badge>
+                  )}
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{content}</p>
                 {file && (
@@ -420,6 +573,40 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
                     <span>Attachment: {file.name}</span>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* Broadcast Stats (after sending) */}
+          {broadcastStats && broadcastStats.totalMembers && (
+            <div className="p-3 rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                <span className="text-sm font-medium text-green-700 dark:text-green-400">
+                  Broadcast Complete
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                <div>
+                  <div className="font-bold text-green-700 dark:text-green-400">
+                    {broadcastStats.totalMembers}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Members</div>
+                </div>
+                <div>
+                  <div className="font-bold text-green-700 dark:text-green-400">
+                    {broadcastStats.pushSent || 0}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Push Sent</div>
+                </div>
+                <div>
+                  <div className="font-bold text-green-700 dark:text-green-400">
+                    {broadcastStats.emailsSent || 0}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    Emails Sent
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -436,17 +623,28 @@ export function BroadcastComposer({ className }: BroadcastComposerProps) {
               (!content.trim() && !file) ||
               selectedRooms.length === 0
             }
-            className="gap-2 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+            className={cn(
+              "gap-2",
+              priority === "urgent"
+                ? "bg-red-500 hover:bg-red-600"
+                : priority === "announcement"
+                  ? "bg-blue-500 hover:bg-blue-600"
+                  : "bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700",
+            )}
           >
             {sending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Sending...
+                {scheduleForLater ? "Scheduling..." : "Sending Broadcast..."}
               </>
             ) : (
               <>
-                <Send className="h-4 w-4" />
-                Send Broadcast
+                {scheduleForLater ? (
+                  <Clock className="h-4 w-4" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {scheduleForLater ? "Schedule Broadcast" : "Send Broadcast"}
               </>
             )}
           </Button>

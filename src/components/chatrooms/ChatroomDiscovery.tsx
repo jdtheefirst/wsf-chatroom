@@ -53,6 +53,8 @@ import {
 } from "lucide-react";
 import { LoginDialog } from "../auth/LoginDialog";
 import { ConfettiOnMount } from "../layout/ConfettiOnMount";
+import { useTotalUnreadCount } from "@/lib/hooks/useUnreadMessages";
+import { FloatingUnreadBadge } from "./FloatUreadBadge";
 
 type StatusMap = Record<ChatroomType, EligibilityStatus>;
 
@@ -72,7 +74,7 @@ const chatroomDescriptions: Record<ChatroomType, string> = {
 
 // Simplified eligibility messages
 const getEligibilityMessage = (
-  status: EligibilityStatus
+  status: EligibilityStatus,
 ): { message: string; icon: React.ReactNode } => {
   if (status.state === "loading")
     return {
@@ -115,12 +117,13 @@ export function ChatroomDiscovery() {
     chatrooms.reduce((acc, room) => {
       acc[room.id] = { state: "loading" };
       return acc;
-    }, {} as StatusMap)
+    }, {} as StatusMap),
   );
   const [loading, setLoading] = useState(true);
   const [showLoginDialog, setShowLoginDialog] = useState(false);
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const { unreadCount, markChatroomAsRead } = useTotalUnreadCount();
 
   // Update showLoginDialog based on profile changes
   useEffect(() => {
@@ -140,10 +143,10 @@ export function ChatroomDiscovery() {
             supabase,
             profile,
             room.id,
-            profile?.country_code ?? null
+            profile?.country_code ?? null,
           );
           return [room.id, status] as const;
-        })
+        }),
       );
 
       if (!cancelled) {
@@ -196,6 +199,10 @@ export function ChatroomDiscovery() {
       }
 
       const data = await res.json();
+
+      // Mark this chatroom as read when entering
+      await markChatroomAsRead(data.chatroom_id);
+
       toast.success("Welcome to the chatroom!");
       router.push(`/chatrooms/${data.chatroom_id}`);
     } catch (err) {
@@ -206,7 +213,7 @@ export function ChatroomDiscovery() {
 
   const handlePreview = (
     room: ChatroomDefinition,
-    status: EligibilityStatus
+    status: EligibilityStatus,
   ) => {
     if (!profile) {
       setShowLoginDialog(true);
@@ -448,7 +455,7 @@ export function ChatroomDiscovery() {
                 key={room.id}
                 className={cn(
                   "group transition-all duration-300 hover:shadow-lg",
-                  isEligible ? "hover:border-primary" : "opacity-90"
+                  isEligible ? "hover:border-primary" : "opacity-90",
                 )}
               >
                 <CardHeader className="pb-3">
@@ -458,7 +465,7 @@ export function ChatroomDiscovery() {
                         className={cn(
                           "rounded-lg p-2",
                           getColorClass(room.color), // Use the color from config
-                          !isEligible && "opacity-50" // Dim if not eligible
+                          !isEligible && "opacity-50", // Dim if not eligible
                         )}
                       >
                         <Icon className="h-5 w-5" />
@@ -483,7 +490,7 @@ export function ChatroomDiscovery() {
                     <Badge
                       variant={isEligible ? "default" : "outline"}
                       className={cn(
-                        isEligible && "bg-green-500 hover:bg-green-600"
+                        isEligible && "bg-green-500 hover:bg-green-600",
                       )}
                     >
                       {isEligible ? "Join Now" : "Restricted"}
@@ -523,7 +530,7 @@ export function ChatroomDiscovery() {
                         className={cn(
                           isEligible
                             ? "text-green-600"
-                            : "text-muted-foreground"
+                            : "text-muted-foreground",
                         )}
                       >
                         {eligibility.message}
@@ -534,14 +541,14 @@ export function ChatroomDiscovery() {
                       variant={isEligible ? "default" : "outline"}
                       onClick={() => handlePreview(room, status)}
                       className={cn(
-                        isEligible && "bg-primary hover:bg-primary/90"
+                        isEligible && "bg-primary hover:bg-primary/90",
                       )}
                     >
                       {!profile
                         ? "Sign In to View"
                         : isEligible
-                        ? "Enter Chat"
-                        : "View Details"}
+                          ? "Enter Chat"
+                          : "View Details"}
                     </Button>
                   </div>
                 </CardFooter>
@@ -591,6 +598,9 @@ export function ChatroomDiscovery() {
             : "Sign in with your World Samma account to access chatrooms"
         }
       />
+
+      {/* Floating Unread Badge - Only show if user is logged in */}
+      {profile && <FloatingUnreadBadge />}
     </>
   );
 }

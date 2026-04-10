@@ -88,6 +88,11 @@ import { ReactionNotification } from "./ReactionNotification";
 import LinkPreview from "./LinkPreviews";
 import { PrivateReplyNotification } from "./PrivateReplyNotification";
 import { BroadcastComposer } from "./BroadcastComposer";
+import {
+  registerServiceWorker,
+  subscribeToPushNotifications,
+} from "@/lib/pwa/serviceWorker";
+import { useTotalUnreadCount } from "@/lib/hooks/useUnreadMessages";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -168,6 +173,19 @@ export function ChatroomMessagesEnhanced({
   const [oldestMessageDate, setOldestMessageDate] = useState<string | null>(
     null,
   );
+  const { markChatroomAsRead } = useTotalUnreadCount();
+
+  // Mark chatroom as read when component mounts
+  useEffect(() => {
+    if (chatroom?.id && profile?.id) {
+      // Mark as read after a short delay (user has seen the messages)
+      const timer = setTimeout(() => {
+        markChatroomAsRead(chatroom.id);
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [chatroom?.id, profile?.id]);
 
   // Add this function to load more messages
   const loadMoreMessages = async () => {
@@ -218,6 +236,32 @@ export function ChatroomMessagesEnhanced({
       setLoadingMore(false);
     }
   };
+
+  useEffect(() => {
+    // Register service worker on mount
+    registerServiceWorker();
+
+    // Check if we should prompt for notifications
+    const checkAndPromptNotifications = async () => {
+      if ("Notification" in window && Notification.permission === "default") {
+        // Wait for user interaction before asking
+        const shouldAsk =
+          localStorage.getItem("notifications-prompted") !== "true";
+        if (shouldAsk) {
+          // You can show a custom UI element to ask
+          setTimeout(() => {
+            const ask = confirm("Enable notifications for new messages?");
+            if (ask) {
+              subscribeToPushNotifications();
+            }
+            localStorage.setItem("notifications-prompted", "true");
+          }, 5000);
+        }
+      }
+    };
+
+    checkAndPromptNotifications();
+  }, []);
 
   // Add scroll listener for infinite scroll
   useEffect(() => {
@@ -672,6 +716,25 @@ export function ChatroomMessagesEnhanced({
                   } as any,
                 );
               }
+            }
+
+            // Only send push if the document is hidden (user not active on site)
+            if (document.hidden) {
+              // Call your API to send push notification
+              fetch("/api/pwa/send-notification", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  message: {
+                    id: messageWithUser.id,
+                    content: messageWithUser.content,
+                    user_name: messageWithUser.user_profile?.full_name,
+                    user_avatar: messageWithUser.user_profile?.avatar_url,
+                  },
+                  chatroomId: chatroom.id,
+                  recipientUserId: profile?.id,
+                }),
+              }).catch((err) => console.error("Failed to send push:", err));
             }
           }
 
@@ -2257,7 +2320,18 @@ export function ChatroomMessagesEnhanced({
                 <Settings className="h-4 w-4 mr-2" />
                 Chat Settings
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleSound}>
+              <DropdownMenuItem
+                onClick={async () => {
+                  toggleSound();
+                  const permission = await Notification.requestPermission();
+                  if (permission === "granted") {
+                    await subscribeToPushNotifications();
+                    toast.success("Notifications enabled!");
+                  } else {
+                    toast.error("Notifications disabled");
+                  }
+                }}
+              >
                 {isSoundEnabled ? (
                   <>
                     <Bell className="h-4 w-4 mr-2" />
