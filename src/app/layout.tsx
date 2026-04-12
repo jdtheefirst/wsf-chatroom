@@ -23,13 +23,12 @@ const APP_DESCRIPTION =
 const APP_URL = "https://chat.worldsamma.org";
 const APP_THEME_COLOR = "#dc2626"; // WSF brand red
 const APP_KEYWORDS = [
-  "Wing Chun",
   "Samma",
   "Martial Arts",
   "WSF",
   "Chat",
   "Community",
-  "Kung Fu",
+  "Kempo Karate",
   "Fighting",
   "Sports",
   "Discussion",
@@ -43,11 +42,11 @@ export const metadata: Metadata = {
   },
   description: APP_DESCRIPTION,
   applicationName: APP_NAME,
-  authors: [{ name: "World Sanshou Federation" }],
+  authors: [{ name: "World Samma Federation" }],
   generator: "Next.js",
   keywords: APP_KEYWORDS,
-  creator: "World Sanshou Federation",
-  publisher: "World Sanshou Federation",
+  creator: "World Samma Federation",
+  publisher: "World Samma Federation",
   robots: {
     index: true,
     follow: true,

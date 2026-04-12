@@ -1,5 +1,13 @@
 // Enhanced config.ts with icons
-import { LucideIcon, Users, GraduationCap, Building2, MapPin, Globe, Shield } from "lucide-react";
+import {
+  LucideIcon,
+  Users,
+  GraduationCap,
+  Building2,
+  MapPin,
+  Globe,
+  Shield,
+} from "lucide-react";
 import { ChatroomDefinition, ChatroomType } from "./types";
 
 export const chatrooms: ChatroomDefinition[] = [
@@ -11,7 +19,7 @@ export const chatrooms: ChatroomDefinition[] = [
     access: "All authenticated users",
     notes: "Public posts are shareable externally",
     features: ["Auto-translation", "Shareable posts", "Global reach"],
-    color: "blue"
+    color: "blue",
   },
   {
     id: "wsf_students",
@@ -21,7 +29,7 @@ export const chatrooms: ChatroomDefinition[] = [
     access: "Students only (admission required)",
     notes: "Private discussions about training",
     features: ["Auto-translation", "Student support", "Progress tracking"],
-    color: "green"
+    color: "green",
   },
   {
     id: "wsf_club_owners",
@@ -31,7 +39,7 @@ export const chatrooms: ChatroomDefinition[] = [
     access: "Club owners & managers",
     notes: "Business and management discussions",
     features: ["File sharing", "Best practices", "Networking"],
-    color: "purple"
+    color: "purple",
   },
   {
     id: "psa",
@@ -41,7 +49,7 @@ export const chatrooms: ChatroomDefinition[] = [
     access: "Provincial association members",
     notes: "Country-specific provincial discussions",
     features: ["Regional updates", "Coordination", "Local events"],
-    color: "orange"
+    color: "orange",
   },
   {
     id: "nsa",
@@ -51,7 +59,7 @@ export const chatrooms: ChatroomDefinition[] = [
     access: "National association members",
     notes: "Country-level strategy and planning",
     features: ["National strategy", "Cross-regional", "Policy"],
-    color: "red"
+    color: "red",
   },
   {
     id: "wsf_committee",
@@ -60,7 +68,26 @@ export const chatrooms: ChatroomDefinition[] = [
     visibility: "private",
     access: "WSF leadership only",
     features: ["File sharing", "Strategic planning", "Decision making"],
-    color: "amber"
+    color: "amber",
+  },
+];
+
+export const chatroomsUuid = [
+  {
+    id: "wsf_fans",
+    uuid: "b67cfe8c-8694-401b-8d77-fec1b824cbab",
+  },
+  {
+    id: "wsf_students",
+    uuid: "c243ec14-ed94-49c5-9900-5572c840f764",
+  },
+  {
+    id: "wsf_club_owners",
+    uuid: "club-owners",
+  },
+  {
+    id: "wsf_committee",
+    uuid: "fe30b7bc-31cc-4c5f-ab94-41fcbd5708c1",
   },
 ];
 
@@ -72,7 +99,7 @@ export const getChatroomIcon = (type: ChatroomType): LucideIcon => {
     wsf_club_owners: Building2,
     psa: MapPin,
     nsa: Globe,
-    wsf_committee: Shield
+    wsf_committee: Shield,
   };
   return icons[type];
 };
