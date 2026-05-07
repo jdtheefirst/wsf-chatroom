@@ -2933,7 +2933,6 @@ export function ChatroomMessagesEnhanced({
 
                       const isCurrentUser = message.user_id === profile?.id;
                       const isBroadcast = message.is_broadcast;
-                      console.log("Message:", message);
 
                       return (
                         <div
