@@ -1,8 +1,8 @@
 // components/chatrooms/ChatroomMessagesEnhanced.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/lib/context/AuthContext";
 import { cn, getInitials } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,8 @@ import {
   FileText,
   Megaphone,
   Verified,
+  BarChart3,
+  Eye,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -93,6 +95,20 @@ import {
   subscribeToPushNotifications,
 } from "@/lib/pwa/serviceWorker";
 import { useTotalUnreadCount } from "@/lib/hooks/useUnreadMessages";
+import { Poll, PollData } from "./Poll";
+import { AudioMessage, AudioData } from "./AudioMessage";
+import { AudioRecorder } from "./AudioRecorder";
+import { PollCreator } from "./PollCreator";
+import { EventReference, EventData } from "./EventReference";
+import { EventPicker } from "./EventPicker";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import { useMessageViewTracking } from "@/lib/hooks/useMessageViewTracking";
 
 type Props = {
   chatroom: ChatroomRecord;
@@ -174,6 +190,47 @@ export function ChatroomMessagesEnhanced({
     null,
   );
   const { markChatroomAsRead } = useTotalUnreadCount();
+  const [showPollCreator, setShowPollCreator] = useState(false);
+  const [showEventPicker, setShowEventPicker] = useState(false);
+  const [eventDataMap, setEventDataMap] = useState<Map<string, EventData>>(
+    new Map(),
+  );
+  const { setupTracking, cleanup } = useMessageViewTracking();
+
+  // Run tracking when messages change or when scrolling stops
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Small delay to ensure DOM is updated
+      const timer = setTimeout(() => {
+        setupTracking();
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [messages, setupTracking]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+  }, [cleanup]);
+
+  // Also re-setup when user scrolls (for lazy-loaded messages)
+  const handleScroll = useCallback(() => {
+    if (messagesContainerRef.current) {
+      setupTracking();
+    }
+  }, [setupTracking]);
+
+  // Add scroll event listener
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.addEventListener("scroll", handleScroll);
+      return () => container.removeEventListener("scroll", handleScroll);
+    }
+  }, [handleScroll]);
 
   // Mark chatroom as read when component mounts
   useEffect(() => {
@@ -645,6 +702,12 @@ export function ChatroomMessagesEnhanced({
             user_reactions: [],
             priority: newMessage.priority || "normal",
             is_broadcast: newMessage.is_broadcast || false,
+            view_count: newMessage.view_count || 0,
+            event_data: newMessage.event_data || null,
+            event_id: newMessage.event_id || null,
+            event_reminder_data: newMessage.event_reminder_data || null,
+            poll_data: newMessage.poll_data || null,
+            audio_data: newMessage.audio_data || null,
             scheduled_at: newMessage.scheduled_at || null,
           };
 
@@ -1640,6 +1703,359 @@ export function ChatroomMessagesEnhanced({
     }
   };
 
+  // ============ POLL FUNCTIONS ============
+  const generateWaveform = async (audioBlob: Blob): Promise<number[]> => {
+    return new Promise((resolve) => {
+      const audioContext = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )();
+      const reader = new FileReader();
+
+      reader.onloadend = async () => {
+        const arrayBuffer = reader.result as ArrayBuffer;
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const channelData = audioBuffer.getChannelData(0);
+
+        const samples = 40;
+        const blockSize = Math.floor(channelData.length / samples);
+        const waveform = [];
+
+        for (let i = 0; i < samples; i++) {
+          let blockStart = i * blockSize;
+          let sum = 0;
+          for (let j = 0; j < blockSize; j++) {
+            sum += Math.abs(channelData[blockStart + j]);
+          }
+          waveform.push(sum / blockSize);
+        }
+
+        const max = Math.max(...waveform);
+        const normalized = waveform.map((v) => v / max);
+        resolve(normalized);
+      };
+
+      reader.readAsArrayBuffer(audioBlob);
+    });
+  };
+
+  const createPoll = async (
+    question: string,
+    options: string[],
+    optionImages: File[],
+    isMultiSelect: boolean,
+    durationDays: number,
+  ) => {
+    if (!profile) return;
+
+    try {
+      // Upload option images
+      const imageUrls = await Promise.all(
+        options.map(async (_, idx) => {
+          const img = optionImages[idx];
+          if (!img) return null;
+
+          const fileName = `poll-${Date.now()}-${idx}-${img.name}`;
+          const filePath = `polls/${chatroom.id}/${fileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from("chat-attachments")
+            .upload(filePath, img);
+
+          if (uploadError) throw uploadError;
+
+          const {
+            data: { publicUrl },
+          } = supabase.storage.from("chat-attachments").getPublicUrl(filePath);
+
+          return publicUrl;
+        }),
+      );
+
+      // Generate option IDs
+      const optionIds = options.map(() => crypto.randomUUID());
+
+      // Prepare poll data
+      const pollData: PollData = {
+        question,
+        is_multi_select: isMultiSelect,
+        expires_at: new Date(
+          Date.now() + durationDays * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+        total_votes: 0,
+        options: options.map((text, idx) => ({
+          id: optionIds[idx],
+          text,
+          image_url: imageUrls[idx] || null,
+          vote_count: 0,
+        })),
+        user_votes: [],
+      };
+
+      // Create message with poll
+      const { error } = await supabase.from("messages").insert({
+        user_id: profile.id,
+        chatroom_id: chatroom.id,
+        content: `📊 POLL: ${question.substring(0, 100)}`,
+        language: profile?.language || "en",
+        poll_data: pollData,
+      });
+
+      if (error) throw error;
+
+      toast.success("Poll created successfully!");
+    } catch (error) {
+      console.error("Error creating poll:", error);
+      toast.error("Failed to create poll");
+      throw error;
+    }
+  };
+
+  const voteOnPoll = async (messageId: string, optionId: string) => {
+    if (!profile) return;
+
+    try {
+      // Get current message
+      const { data: message, error: fetchError } = await supabase
+        .from("messages")
+        .select("poll_data")
+        .eq("id", messageId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const pollData = message.poll_data as PollData;
+
+      // Check if expired
+      if (new Date(pollData.expires_at) < new Date()) {
+        toast.error("This poll has expired");
+        return;
+      }
+
+      // Check if already voted
+      if (pollData.user_votes?.includes(optionId)) {
+        toast.error("You already voted for this option");
+        return;
+      }
+
+      // For single-select, check if already voted
+      if (!pollData.is_multi_select && pollData.user_votes?.length > 0) {
+        toast.error("You can only vote once in this poll");
+        return;
+      }
+
+      // Update poll data
+      const updatedPollData = {
+        ...pollData,
+        total_votes: pollData.total_votes + 1,
+        options: pollData.options.map((opt) =>
+          opt.id === optionId
+            ? { ...opt, vote_count: opt.vote_count + 1 }
+            : opt,
+        ),
+        user_votes: [...(pollData.user_votes || []), optionId],
+      };
+
+      // Update message
+      const { error: updateError } = await supabase
+        .from("messages")
+        .update({ poll_data: updatedPollData })
+        .eq("id", messageId);
+
+      if (updateError) throw updateError;
+
+      // Update local state
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, poll_data: updatedPollData } : msg,
+        ),
+      );
+
+      toast.success("Vote recorded!");
+    } catch (error) {
+      console.error("Error voting:", error);
+      toast.error("Failed to record vote");
+    }
+  };
+
+  // ============ AUDIO FUNCTIONS ============
+  const sendAudioMessage = async (audioBlob: Blob, duration: number) => {
+    if (!profile) return;
+
+    try {
+      // Generate waveform
+      const waveformData = await generateWaveform(audioBlob);
+
+      // Upload audio file
+      const fileName = `audio-${Date.now()}.webm`;
+      const filePath = `audio/${chatroom.id}/${profile.id}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("chat-attachments")
+        .upload(filePath, audioBlob);
+
+      if (uploadError) throw uploadError;
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("chat-attachments").getPublicUrl(filePath);
+
+      // Prepare audio data
+      const audioData: AudioData = {
+        url: publicUrl,
+        duration,
+        waveform_data: waveformData,
+        size_bytes: audioBlob.size,
+      };
+
+      // Create message with audio
+      const { error: insertError } = await supabase.from("messages").insert({
+        user_id: profile.id,
+        chatroom_id: chatroom.id,
+        content: "🎤 Voice message",
+        language: profile?.language || "en",
+        audio_data: audioData,
+      });
+
+      if (insertError) throw insertError;
+
+      toast.success("Voice message sent!");
+    } catch (error) {
+      console.error("Error sending audio:", error);
+      toast.error("Failed to send voice message");
+    }
+  };
+
+  // ============ EVENT FUNCTIONS ============
+  const shareEventInChat = async (eventId: string) => {
+    if (!profile) return;
+
+    try {
+      const { data: event, error } = await supabase
+        .from("events")
+        .select(
+          `
+        *,
+        attendee_count:event_registrations(count)
+      `,
+        )
+        .eq("id", eventId)
+        .single();
+
+      if (error) throw error;
+
+      // Check if user is registered
+      const { data: registration } = await supabase
+        .from("event_registrations")
+        .select("status")
+        .eq("event_id", eventId)
+        .eq("user_id", profile.id)
+        .maybeSingle();
+
+      const eventWithStatus = {
+        ...event,
+        user_registration_status: registration?.status,
+      };
+
+      const { error: insertError } = await supabase.from("messages").insert({
+        user_id: profile.id,
+        chatroom_id: chatroom.id,
+        content: `📅 Event: ${event.title}`,
+        language: profile?.language || "en",
+        event_id: eventId,
+      });
+
+      if (insertError) throw insertError;
+
+      // Cache event data
+      setEventDataMap((prev) => new Map(prev).set(eventId, eventWithStatus));
+      toast.success("Event shared in chat!");
+    } catch (error) {
+      console.error("Error sharing event:", error);
+      toast.error("Failed to share event");
+    }
+  };
+
+  const setEventReminder = async (eventId: string, remindAt: Date) => {
+    if (!profile) return;
+
+    try {
+      const { data: message } = await supabase
+        .from("messages")
+        .select("id")
+        .eq("event_id", eventId)
+        .eq("chatroom_id", chatroom.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!message) {
+        toast.error("Event reference not found");
+        return;
+      }
+
+      const { error } = await supabase.from("event_reminders").upsert({
+        message_id: message.id,
+        event_id: eventId,
+        user_id: profile.id,
+        remind_at: remindAt.toISOString(),
+        status: "pending",
+      });
+
+      if (error) throw error;
+
+      toast.success(`Reminder set for ${format(remindAt, "MMM d, h:mm a")}`);
+    } catch (error) {
+      console.error("Error setting reminder:", error);
+      toast.error("Failed to set reminder");
+    }
+  };
+
+  const fetchEventsForMessages = async (messages: MessageRow[]) => {
+    const eventMessages = messages.filter(
+      (m) => m.event_id && !eventDataMap.has(m.event_id),
+    );
+    if (eventMessages.length === 0) return;
+
+    const eventIds = [...new Set(eventMessages.map((m) => m.event_id))];
+
+    const { data: events } = await supabase
+      .from("events")
+      .select(
+        `
+      *,
+      attendee_count:event_registrations(count)
+    `,
+      )
+      .in("id", eventIds);
+
+    if (events) {
+      // Fetch registration status for current user
+      const { data: registrations } = await supabase
+        .from("event_registrations")
+        .select("event_id, status")
+        .in("event_id", eventIds)
+        .eq("user_id", profile?.id || "");
+
+      const regMap = new Map(registrations?.map((r) => [r.event_id, r.status]));
+
+      const newMap = new Map(eventDataMap);
+      events.forEach((event) => {
+        newMap.set(event.id, {
+          ...event,
+          user_registration_status: regMap.get(event.id),
+        });
+      });
+      setEventDataMap(newMap);
+    }
+  };
+
+  // Fetch event data for messages that have event_id
+  useEffect(() => {
+    if (messages.length > 0 && profile?.id) {
+      fetchEventsForMessages(messages);
+    }
+  }, [messages, profile?.id]);
+
   const renderMessageContent = (message: MessageRow) => {
     const translated = message.translated_content?.[targetLang];
     const showTranslated = translated && targetLang !== message.language;
@@ -2045,6 +2461,12 @@ export function ChatroomMessagesEnhanced({
               <span>{count}</span>
             </Button>
           ))}
+          {message.view_count > 0 && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1 ml-2">
+              <Eye className="h-3 w-3" />
+              {message.view_count}
+            </span>
+          )}
         </div>
         <Button
           variant="ghost"
@@ -2504,6 +2926,8 @@ export function ChatroomMessagesEnhanced({
                         <div
                           key={message.id}
                           ref={isHighlighted ? highlightedMessageRef : null}
+                          data-message-id={message.id}
+                          data-message-content={message.content}
                           id={`message-${message.id}`}
                           className={cn(
                             "relative group flex flex-col sm:flex-row gap-3 sm:gap-4 p-4 rounded-2xl transition-all duration-200 hover:bg-muted/30 w-full",
@@ -3109,6 +3533,39 @@ export function ChatroomMessagesEnhanced({
                               </DropdownMenu>
                             </div>
                           </div>
+                          {/* Poll */}
+                          {message.poll_data && (
+                            <Poll
+                              pollData={message.poll_data}
+                              messageId={message.id}
+                              onVote={(optionId) =>
+                                voteOnPoll(message.id, optionId)
+                              }
+                              isOwn={isCurrentUser}
+                            />
+                          )}
+
+                          {/* Audio Message */}
+                          {message.audio_data && (
+                            <AudioMessage
+                              audioData={message.audio_data}
+                              isOwn={isCurrentUser}
+                            />
+                          )}
+
+                          {/* Event Reference */}
+                          {message.event_id &&
+                            eventDataMap.get(message.event_id) && (
+                              <EventReference
+                                event={eventDataMap.get(message.event_id)!}
+                                messageId={message.id}
+                                onRemind={setEventReminder}
+                                onViewEvent={(eventId, slug) => {
+                                  router.push(`/events/${slug}`);
+                                }}
+                                isOwn={isCurrentUser}
+                              />
+                            )}
                         </div>
                       );
                     })}
@@ -3195,6 +3652,35 @@ export function ChatroomMessagesEnhanced({
                         className="min-h-[56px] max-h-[120px] resize-none rounded-xl border-2 pr-12 focus-visible:ring-0 focus-visible:border-primary"
                       />
                       <div className="absolute right-1 sm:right-3 bottom-3 flex items-center">
+                        {/* Poll Creator Button */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setShowPollCreator(true)}
+                          disabled={sending}
+                          className="h-8 w-8 rounded-lg"
+                          title="Create Poll"
+                        >
+                          <BarChart3 className="h-4 w-4" />
+                        </Button>
+
+                        {/* Audio Recorder */}
+                        <AudioRecorder
+                          onSend={sendAudioMessage}
+                          disabled={sending}
+                        />
+
+                        {/* Event Picker Button */}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setShowEventPicker(true)}
+                          disabled={sending}
+                          className="h-8 w-8 rounded-lg"
+                          title="Share Event"
+                        >
+                          <Calendar className="h-4 w-4" />
+                        </Button>
                         <EmojiPickerComponent
                           onEmojiSelect={handleEmojiSelect}
                           disabled={sending}
@@ -3248,6 +3734,36 @@ export function ChatroomMessagesEnhanced({
                     </div>
                   </div>
                 </div>
+              </div>
+              <div>
+                {/* Poll Creator Dialog */}
+                <PollCreator
+                  open={showPollCreator}
+                  onOpenChange={setShowPollCreator}
+                  onCreate={createPoll}
+                />
+
+                {/* Event Picker Dialog */}
+                <Dialog
+                  open={showEventPicker}
+                  onOpenChange={setShowEventPicker}
+                >
+                  <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                      <DialogTitle>Share an Event</DialogTitle>
+                      <DialogDescription>
+                        Select an event to share with the chatroom
+                      </DialogDescription>
+                    </DialogHeader>
+
+                    <EventPicker
+                      onSelect={async (eventId) => {
+                        await shareEventInChat(eventId);
+                        setShowEventPicker(false);
+                      }}
+                    />
+                  </DialogContent>
+                </Dialog>
               </div>
             </div>
           </TabsContent>

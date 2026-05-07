@@ -1,3 +1,5 @@
+import { EventData } from "@/components/chatrooms/EventReference";
+
 export type ChatroomType =
   | "wsf_fans"
   | "wsf_students"
@@ -53,6 +55,32 @@ export type MessageRow = {
   user_reactions?: string[]; // ["👍", "❤️"] - reactions by current user
   priority?: "normal" | "urgent" | "announcement";
   is_broadcast?: boolean;
+  event_id?: string | null;
+  event_data?: EventData; // Joined from events table
+  event_reminder_data?: {
+    remind_at?: string;
+    notified_users?: string[];
+  } | null; // Joined from event_reminders table
+  poll_data?: {
+    question: string;
+    is_multi_select: boolean;
+    expires_at: string;
+    total_votes: number;
+    options: Array<{
+      id: string;
+      text: string;
+      image_url: string | null;
+      vote_count: number;
+    }>;
+    user_votes: string[];
+  } | null; // For messages that are polls
+  audio_data?: {
+    url: string;
+    duration: number;
+    waveform_data: number[];
+    size_bytes?: number;
+  } | null; // For messages that are audio recordings
+  view_count: number; // For tracking message views
   scheduled_at?: string | null;
 };
 

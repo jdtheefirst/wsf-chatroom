@@ -58,6 +58,191 @@ ADD COLUMN IF NOT EXISTS priority public.broadcast_priority DEFAULT 'normal',
 ADD COLUMN IF NOT EXISTS is_broadcast boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS scheduled_at timestamptz;
 
+-- Add broadcast tracking columns to messages table
+ALTER TABLE public.messages
+ADD COLUMN IF NOT EXISTS broadcast_sent_at timestamptz,
+ADD COLUMN IF NOT EXISTS broadcast_stats jsonb;
+
+-- Create index for faster broadcast queries
+CREATE INDEX IF NOT EXISTS idx_messages_broadcast_sent 
+ON public.messages(broadcast_sent_at) 
+WHERE is_broadcast = true;
+
+-- Add all new columns to messages table
+ALTER TABLE public.messages 
+ADD COLUMN IF NOT EXISTS poll_data jsonb,
+ADD COLUMN IF NOT EXISTS audio_data jsonb,
+ADD COLUMN IF NOT EXISTS event_id uuid REFERENCES public.events(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS event_reminder_data jsonb;
+
+-- Create event reminders table
+CREATE TABLE IF NOT EXISTS public.event_reminders (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid REFERENCES public.messages(id) ON DELETE CASCADE,
+  event_id uuid REFERENCES public.events(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES public.users_profile(id),
+  remind_at timestamptz NOT NULL,
+  status text default 'pending' CHECK (status IN ('pending', 'sent', 'cancelled')),
+  created_at timestamptz default now(),
+  UNIQUE(message_id, user_id)
+);
+
+-- RLS for event reminders
+ALTER TABLE public.event_reminders ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can manage their event reminders" 
+ON public.event_reminders FOR ALL
+USING (auth.uid() = user_id);
+
+-- Simple message views table for analytics
+CREATE TABLE IF NOT EXISTS public.message_views (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid REFERENCES public.messages(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES public.users_profile(id),
+  session_id text, -- For anonymous tracking
+  viewed_at timestamptz default now(),
+  duration_seconds integer, -- How long they viewed
+  content_length integer -- Length of message when viewed
+);
+
+-- Add view_count column to messages for quick access
+ALTER TABLE public.messages 
+ADD COLUMN IF NOT EXISTS view_count integer DEFAULT 0;
+
+-- Create indexes
+CREATE INDEX idx_message_views_message_id ON public.message_views(message_id);
+CREATE INDEX idx_message_views_user_id ON public.message_views(user_id);
+CREATE INDEX idx_message_views_viewed_at ON public.message_views(viewed_at);
+
+-- Function to increment message view (bypasses RLS for inserts)
+CREATE OR REPLACE FUNCTION increment_message_view(
+  p_message_id uuid,
+  p_duration integer
+)
+RETURNS void
+SECURITY DEFINER -- Runs with owner privileges
+SET search_path = public
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_user_id uuid;
+  v_session_id text;
+BEGIN
+  -- Get current user ID (will be NULL if not authenticated)
+  v_user_id := auth.uid();
+  
+  -- Generate session ID for anonymous/unauthenticated
+  v_session_id := COALESCE(
+    current_setting('request.headers', true)::json->>'x-session-id',
+    gen_random_uuid()::text
+  );
+  
+  -- Only increment if user is authenticated (belongs to chatroom check will happen in application)
+  IF v_user_id IS NOT NULL THEN
+    -- Update message view count
+    UPDATE public.messages 
+    SET view_count = COALESCE(view_count, 0) + 1
+    WHERE id = p_message_id;
+    
+    -- Insert view record for analytics
+    INSERT INTO public.message_views (
+      message_id, 
+      user_id, 
+      session_id,
+      duration_seconds,
+      content_length,
+      viewed_at
+    )
+    SELECT 
+      p_message_id, 
+      v_user_id,
+      v_session_id,
+      p_duration,
+      LENGTH(content)
+    FROM public.messages 
+    WHERE id = p_message_id;
+  ELSE
+    -- For anonymous users, just track without user_id
+    INSERT INTO public.message_views (
+      message_id, 
+      user_id, 
+      session_id,
+      duration_seconds,
+      content_length,
+      viewed_at
+    )
+    SELECT 
+      p_message_id, 
+      NULL,
+      v_session_id,
+      p_duration,
+      LENGTH(content)
+    FROM public.messages 
+    WHERE id = p_message_id;
+    
+    -- Still increment the view count for anonymous
+    UPDATE public.messages 
+    SET view_count = COALESCE(view_count, 0) + 1
+    WHERE id = p_message_id;
+  END IF;
+END;
+$$;
+
+-- Grant execute to authenticated and anonymous users
+GRANT EXECUTE ON FUNCTION increment_message_view(uuid, integer) TO authenticated, anon;
+
+-- RLS for message views
+CREATE POLICY "Anyone can insert message views" 
+ON public.message_views FOR INSERT 
+TO public
+WITH CHECK (true);
+
+ALTER TABLE public.message_views ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can see their message views" 
+ON public.message_views FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Create indexes
+CREATE INDEX IF NOT EXISTS idx_messages_poll_data ON public.messages USING gin (poll_data);
+CREATE INDEX IF NOT EXISTS idx_messages_audio_data ON public.messages USING gin (audio_data);
+CREATE INDEX IF NOT EXISTS idx_messages_event_id ON public.messages(event_id) WHERE event_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_event_reminders_remind_at ON public.event_reminders(remind_at) WHERE status = 'pending';
+
+-- Helper function to update poll votes (optional, for atomic updates)
+CREATE OR REPLACE FUNCTION update_poll_vote(message_id uuid, option_id text, user_id uuid)
+RETURNS void AS $$
+DECLARE
+  current_poll jsonb;
+  updated_poll jsonb;
+  options jsonb;
+BEGIN
+  -- Get current poll data
+  SELECT poll_data INTO current_poll FROM public.messages WHERE id = message_id;
+  
+  -- Update the poll data
+  UPDATE public.messages 
+  SET poll_data = jsonb_set(
+    jsonb_set(
+      jsonb_set(
+        current_poll,
+        '{total_votes}',
+        ((current_poll->>'total_votes')::int + 1)::text::jsonb
+      ),
+      '{options}',
+        (SELECT jsonb_agg(
+          CASE 
+            WHEN opt->>'id' = option_id THEN
+              jsonb_set(opt, '{vote_count}', ((opt->>'vote_count')::int + 1)::text::jsonb)
+            ELSE opt
+          END
+        ) FROM jsonb_array_elements(current_poll->'options') AS opt)
+    ),
+    '{user_votes}',
+    (COALESCE(current_poll->'user_votes', '[]'::jsonb) || to_jsonb(option_id))
+  )
+  WHERE id = message_id;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Note: Changed p_country_code parameter from char(2) to text to handle NULL
 CREATE OR REPLACE FUNCTION get_or_create_chatroom(
   p_type chatroom_type,
