@@ -849,7 +849,6 @@ export function ChatroomMessagesEnhanced({
           filter: `chatroom_id=eq.${chatroom.id}`,
         },
         async (payload) => {
-          console.log("Message updated:", payload);
           const updatedMessage = payload.new as any;
 
           // Update message in state

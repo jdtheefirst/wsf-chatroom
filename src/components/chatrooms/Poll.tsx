@@ -46,6 +46,8 @@ export function Poll({ pollData, onVote, isOwn }: PollProps) {
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showMultiSelectConfirm, setShowMultiSelectConfirm] = useState(false);
 
+  console.log("Rendering Poll with data:", pollData);
+
   const isExpired = new Date(pollData.expires_at) < new Date();
   const hasVoted = pollData.user_votes && pollData.user_votes.length > 0;
   const canVote = !hasVoted && !isExpired && !isOwn;
