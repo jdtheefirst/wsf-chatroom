@@ -39,6 +39,11 @@ const getChatroomData = cache(async (id: string) => {
       reactions_count,
       priority,
       is_broadcast,
+      event_id,
+      event_reminder_data,
+      poll_data,
+      audio_data,
+      view_count,
       scheduled_at,
       user_profile:users_profile!messages_user_id_fkey (
         id,
@@ -89,6 +94,11 @@ const getChatroomData = cache(async (id: string) => {
         content,
         language,
         file_url,
+        audio_data,
+        view_count,
+        poll_data,
+        event_id,
+        event_reminder_data,
         created_at,
         user_id,
         user_profile:users_profile!messages_user_id_fkey (

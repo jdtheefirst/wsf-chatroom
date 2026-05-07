@@ -703,7 +703,6 @@ export function ChatroomMessagesEnhanced({
             priority: newMessage.priority || "normal",
             is_broadcast: newMessage.is_broadcast || false,
             view_count: newMessage.view_count || 0,
-            event_data: newMessage.event_data || null,
             event_id: newMessage.event_id || null,
             event_reminder_data: newMessage.event_reminder_data || null,
             poll_data: newMessage.poll_data || null,
@@ -1815,15 +1814,13 @@ export function ChatroomMessagesEnhanced({
 
     try {
       // Get current message
-      const { data: message, error: fetchError } = await supabase
-        .from("messages")
-        .select("poll_data")
-        .eq("id", messageId)
-        .single();
+      const findMessage = messages.find((msg) => msg.id === messageId);
+      if (!findMessage) {
+        toast.error("Poll not found");
+        return;
+      }
 
-      if (fetchError) throw fetchError;
-
-      const pollData = message.poll_data as PollData;
+      const pollData = findMessage.poll_data as PollData;
 
       // Check if expired
       if (new Date(pollData.expires_at) < new Date()) {
@@ -2915,6 +2912,7 @@ export function ChatroomMessagesEnhanced({
 
                       const isCurrentUser = message.user_id === profile?.id;
                       const isBroadcast = message.is_broadcast;
+                      console.log("Message:", message);
 
                       return (
                         <div
@@ -3340,7 +3338,9 @@ export function ChatroomMessagesEnhanced({
                                     messageId={message.id}
                                     onRemind={setEventReminder}
                                     onViewEvent={(eventId, slug) => {
-                                      router.push(`/events/${slug}`);
+                                      router.push(
+                                        `https://www.worldsamma.org/students/events/${slug}`,
+                                      );
                                     }}
                                     isOwn={isCurrentUser}
                                   />
