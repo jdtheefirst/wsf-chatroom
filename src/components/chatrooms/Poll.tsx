@@ -46,8 +46,6 @@ export function Poll({ pollData, onVote, isOwn }: PollProps) {
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [showMultiSelectConfirm, setShowMultiSelectConfirm] = useState(false);
 
-  console.log("Rendering Poll with data:", pollData);
-
   const isExpired = new Date(pollData.expires_at) < new Date();
   const hasVoted = pollData.user_votes && pollData.user_votes.length > 0;
   const canVote = !hasVoted && !isExpired && !isOwn;
@@ -145,7 +143,41 @@ export function Poll({ pollData, onVote, isOwn }: PollProps) {
           const showResults = hasVoted || isExpired || isOwn;
 
           return (
-            <div key={option.id} className="space-y-1">
+            <div key={option.id} className="space-y-2">
+              {/* Image above the button (if exists) */}
+              {option.image_url && (
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <div className="relative w-full h-32 rounded-lg overflow-hidden cursor-pointer group">
+                      {/* Modern overlay with blur */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-80 group-hover:opacity-100 transition-all duration-300 z-10" />
+                      <div className="absolute inset-0 flex items-center justify-center opacity-80 group-hover:opacity-100 transition-all duration-300 z-20">
+                        <div className="bg-white/20 backdrop-blur-md rounded-full p-2 shadow-lg">
+                          <ImageIcon className="h-6 w-6 text-white" />
+                        </div>
+                      </div>
+                      <Image
+                        src={option.image_url}
+                        alt={option.text}
+                        fill
+                        className="object-cover transition-transform duration-500 group-hover:scale-110"
+                      />
+                    </div>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl p-0 overflow-hidden">
+                    <div className="relative w-full h-[80vh]">
+                      <Image
+                        src={option.image_url}
+                        alt={option.text}
+                        fill
+                        className="object-contain"
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+
+              {/* Vote button */}
               <button
                 onClick={() => handleVote(option.id)}
                 disabled={!canVote || (pollData.is_multi_select && isUserVoted)}
@@ -157,65 +189,31 @@ export function Poll({ pollData, onVote, isOwn }: PollProps) {
                   canVote && "cursor-pointer",
                 )}
               >
-                <div className="flex items-start gap-3">
-                  {/* Option Image */}
-                  {option.image_url && (
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <button
-                          className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <Image
-                            src={option.image_url}
-                            alt={option.text}
-                            fill
-                            className="object-cover"
-                          />
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-4xl p-0 overflow-hidden">
-                        <div className="relative w-full h-[80vh]">
-                          <Image
-                            src={option.image_url}
-                            alt={option.text}
-                            fill
-                            className="object-contain"
-                          />
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                  )}
-
-                  {/* Option Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-medium text-sm">{option.text}</span>
-                      {showResults && (
-                        <span className="text-xs text-muted-foreground">
-                          {option.vote_count} vote
-                          {option.vote_count !== 1 ? "s" : ""}
-                          {totalVotes > 0 && ` (${Math.round(percentage)}%)`}
-                        </span>
-                      )}
-                    </div>
-
-                    {showResults && (
-                      <Progress value={percentage} className="h-2" />
-                    )}
-
-                    {pollData.is_multi_select && canVote && isSelected && (
-                      <div className="flex items-center gap-1 mt-1">
-                        <Check className="h-3 w-3 text-primary" />
-                        <span className="text-xs text-primary">Selected</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {isUserVoted && !pollData.is_multi_select && (
-                    <CheckCheck className="h-5 w-5 text-primary flex-shrink-0" />
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-sm">{option.text}</span>
+                  {showResults && (
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {option.vote_count} vote
+                      {option.vote_count !== 1 ? "s" : ""}
+                      {totalVotes > 0 && ` (${Math.round(percentage)}%)`}
+                    </span>
                   )}
                 </div>
+
+                {showResults && (
+                  <Progress value={percentage} className="h-2 mt-2" />
+                )}
+
+                {pollData.is_multi_select && canVote && isSelected && (
+                  <div className="flex items-center gap-1 mt-2">
+                    <Check className="h-3 w-3 text-primary" />
+                    <span className="text-xs text-primary">Selected</span>
+                  </div>
+                )}
+
+                {isUserVoted && !pollData.is_multi_select && (
+                  <CheckCheck className="absolute right-3 top-3 h-5 w-5 text-primary" />
+                )}
               </button>
             </div>
           );
