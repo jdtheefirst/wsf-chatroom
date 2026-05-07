@@ -2461,12 +2461,6 @@ export function ChatroomMessagesEnhanced({
               <span>{count}</span>
             </Button>
           ))}
-          {message.view_count > 0 && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1 ml-2">
-              <Eye className="h-3 w-3" />
-              {message.view_count}
-            </span>
-          )}
         </div>
         <Button
           variant="ghost"
@@ -3318,6 +3312,40 @@ export function ChatroomMessagesEnhanced({
                                 </div>
                               )}
 
+                              {/* Poll */}
+                              {message.poll_data && (
+                                <Poll
+                                  pollData={message.poll_data}
+                                  messageId={message.id}
+                                  onVote={(optionId) =>
+                                    voteOnPoll(message.id, optionId)
+                                  }
+                                  isOwn={isCurrentUser}
+                                />
+                              )}
+
+                              {/* Audio Message */}
+                              {message.audio_data && (
+                                <AudioMessage
+                                  audioData={message.audio_data}
+                                  isOwn={isCurrentUser}
+                                />
+                              )}
+
+                              {/* Event Reference */}
+                              {message.event_id &&
+                                eventDataMap.get(message.event_id) && (
+                                  <EventReference
+                                    event={eventDataMap.get(message.event_id)!}
+                                    messageId={message.id}
+                                    onRemind={setEventReminder}
+                                    onViewEvent={(eventId, slug) => {
+                                      router.push(`/events/${slug}`);
+                                    }}
+                                    isOwn={isCurrentUser}
+                                  />
+                                )}
+
                               {message.file_url &&
                                 fileUrls[message.file_url] && (
                                   <div className="mt-3 w-full">
@@ -3454,8 +3482,16 @@ export function ChatroomMessagesEnhanced({
                                 )}
 
                               {/* Reactions */}
-                              {renderReactions(message)}
-                              {renderReactionsPicker(message)}
+                              <div className="flex items-center gap-2">
+                                {renderReactions(message)}
+                                {renderReactionsPicker(message)}
+                                {message.view_count > 0 && (
+                                  <span className="mt-2 text-xs text-base text-muted-foreground flex items-center gap-1 ml-2">
+                                    <Eye className="h-3 w-3" />
+                                    {message.view_count}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             {/* Mobile Message Actions - Full width row */}
@@ -3533,39 +3569,6 @@ export function ChatroomMessagesEnhanced({
                               </DropdownMenu>
                             </div>
                           </div>
-                          {/* Poll */}
-                          {message.poll_data && (
-                            <Poll
-                              pollData={message.poll_data}
-                              messageId={message.id}
-                              onVote={(optionId) =>
-                                voteOnPoll(message.id, optionId)
-                              }
-                              isOwn={isCurrentUser}
-                            />
-                          )}
-
-                          {/* Audio Message */}
-                          {message.audio_data && (
-                            <AudioMessage
-                              audioData={message.audio_data}
-                              isOwn={isCurrentUser}
-                            />
-                          )}
-
-                          {/* Event Reference */}
-                          {message.event_id &&
-                            eventDataMap.get(message.event_id) && (
-                              <EventReference
-                                event={eventDataMap.get(message.event_id)!}
-                                messageId={message.id}
-                                onRemind={setEventReminder}
-                                onViewEvent={(eventId, slug) => {
-                                  router.push(`/events/${slug}`);
-                                }}
-                                isOwn={isCurrentUser}
-                              />
-                            )}
                         </div>
                       );
                     })}
