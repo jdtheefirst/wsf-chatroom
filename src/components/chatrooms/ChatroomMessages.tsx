@@ -928,11 +928,62 @@ export function ChatroomMessagesEnhanced({
       )
       .subscribe();
 
+    const pollVotesChannel = supabase
+      .channel(`poll_votes:${chatroom.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "poll_votes",
+        },
+        async (payload) => {
+          const newVote = payload.new;
+
+          // Ignore current user's votes (already handled by optimistic update)
+          if (newVote.user_id === profile?.id) return;
+
+          // Update the poll data in real-time
+          setMessages((prev) =>
+            prev.map((msg) => {
+              if (msg.id === newVote.message_id && msg.poll_data) {
+                const pollData = msg.poll_data;
+
+                // Check if user already has this vote in their local data
+                const alreadyCounted = pollData.options.some(
+                  (opt) =>
+                    opt.id === newVote.option_id &&
+                    pollData.user_votes?.includes(newVote.option_id),
+                );
+
+                if (alreadyCounted) return msg;
+
+                return {
+                  ...msg,
+                  poll_data: {
+                    ...pollData,
+                    total_votes: pollData.total_votes + 1,
+                    options: pollData.options.map((opt) =>
+                      opt.id === newVote.option_id
+                        ? { ...opt, vote_count: opt.vote_count + 1 }
+                        : opt,
+                    ),
+                  },
+                };
+              }
+              return msg;
+            }),
+          );
+        },
+      )
+      .subscribe();
+
     return () => {
       if (leaderboardRefetchTimeout.current) {
         clearTimeout(leaderboardRefetchTimeout.current);
       }
       supabase.removeChannel(channel);
+      supabase.removeChannel(pollVotesChannel);
     };
   }, [chatroom.id, profile?.id, isSoundEnabled, soundInstance, messages]);
 
@@ -1003,22 +1054,47 @@ export function ChatroomMessagesEnhanced({
 
   useEffect(() => {
     const hydrateMessages = async () => {
-      // Check if any messages need hydration
-      const needsHydration = messages.some(
+      let updatedMessages = messages;
+      let needsUpdate = false;
+
+      // Check if any messages need reply hydration
+      const needsReplyHydration = messages.some(
         (msg) => msg.reply_to && !msg.reply_to_message,
       );
 
-      if (needsHydration) {
+      if (needsReplyHydration) {
         const hydratedMessages = await hydrateReplyMessages(messages);
-        // Only update if something changed
         if (JSON.stringify(hydratedMessages) !== JSON.stringify(messages)) {
-          setMessages(hydratedMessages);
+          updatedMessages = hydratedMessages;
+          needsUpdate = true;
         }
+      }
+
+      // Check if any messages need poll vote hydration
+      const needsPollHydration = messages.some(
+        (msg) =>
+          msg.poll_data &&
+          (!msg.poll_data.user_votes || msg.poll_data.user_votes.length === 0),
+      );
+
+      if (needsPollHydration) {
+        const hydratedWithVotes = await hydratePollVotes(updatedMessages);
+        if (
+          JSON.stringify(hydratedWithVotes) !== JSON.stringify(updatedMessages)
+        ) {
+          updatedMessages = hydratedWithVotes;
+          needsUpdate = true;
+        }
+      }
+
+      // Only update state if something changed
+      if (needsUpdate) {
+        setMessages(updatedMessages);
       }
     };
 
     hydrateMessages();
-  }, [messages]);
+  }, [messages, profile?.id]);
 
   // Presence management - WORKING VERSION
   useEffect(() => {
@@ -1290,6 +1366,62 @@ export function ChatroomMessagesEnhanced({
     } catch (error) {
       console.error("Error hydrating reply messages:", error);
       return visibleMessages;
+    }
+  };
+
+  // Function to hydrate poll votes for messages
+  const hydratePollVotes = async (messagesToHydrate: MessageRow[]) => {
+    if (!profile?.id) return messagesToHydrate;
+
+    // Find messages that have polls but no user_votes
+    const messagesNeedingVotes = messagesToHydrate.filter(
+      (msg) =>
+        msg.poll_data &&
+        (!msg.poll_data.user_votes || msg.poll_data.user_votes.length === 0),
+    );
+
+    if (messagesNeedingVotes.length === 0) {
+      return messagesToHydrate;
+    }
+
+    try {
+      // Get all unique message IDs that need votes
+      const messageIds = messagesNeedingVotes.map((msg) => msg.id);
+
+      // Fetch user's votes for these messages
+      const { data: userVotes, error } = await supabase
+        .from("poll_votes")
+        .select("message_id, option_id")
+        .in("message_id", messageIds)
+        .eq("user_id", profile.id);
+
+      if (error) throw error;
+
+      // Create a map for quick lookup (message_id -> array of option_ids)
+      const votesMap = new Map();
+      userVotes?.forEach((vote) => {
+        if (!votesMap.has(vote.message_id)) {
+          votesMap.set(vote.message_id, []);
+        }
+        votesMap.get(vote.message_id).push(vote.option_id);
+      });
+
+      // Hydrate messages with user_votes
+      return messagesToHydrate.map((msg) => {
+        if (msg.poll_data && votesMap.has(msg.id)) {
+          return {
+            ...msg,
+            poll_data: {
+              ...msg.poll_data,
+              user_votes: votesMap.get(msg.id),
+            },
+          };
+        }
+        return msg;
+      });
+    } catch (error) {
+      console.error("Error hydrating poll votes:", error);
+      return messagesToHydrate;
     }
   };
 
@@ -1812,58 +1944,69 @@ export function ChatroomMessagesEnhanced({
   const voteOnPoll = async (messageId: string, optionId: string) => {
     if (!profile) return;
 
+    // Optimistic update - update UI immediately
+    const originalMessages = [...messages];
+    const messageIndex = messages.findIndex((msg) => msg.id === messageId);
+
+    if (messageIndex === -1) return;
+
+    const originalPollData = messages[messageIndex].poll_data;
+
+    // Apply optimistic update
+    setMessages((prev) =>
+      prev.map((msg) => {
+        if (msg.id === messageId && msg.poll_data) {
+          const pollData = msg.poll_data;
+          return {
+            ...msg,
+            poll_data: {
+              ...pollData,
+              total_votes: pollData.total_votes + 1,
+              options: pollData.options.map((opt) =>
+                opt.id === optionId
+                  ? { ...opt, vote_count: opt.vote_count + 1 }
+                  : opt,
+              ),
+              user_votes: [...(pollData.user_votes || []), optionId],
+            },
+          };
+        }
+        return msg;
+      }),
+    );
+
     try {
-      // Get current message
-      const findMessage = messages.find((msg) => msg.id === messageId);
-      if (!findMessage) {
-        toast.error("Poll not found");
+      // Call the atomic database function
+      const { data: updatedPollData, error } = await supabase.rpc(
+        "update_poll_vote",
+        {
+          p_message_id: messageId,
+          p_option_id: optionId,
+          p_user_id: profile.id,
+        },
+      );
+
+      if (error) {
+        // Revert optimistic update on error
+        setMessages(originalMessages);
+
+        // Handle specific errors
+        if (error.message.includes("expired")) {
+          toast.error("This poll has expired");
+        } else if (error.message.includes("already voted")) {
+          toast.error("You already voted for this option");
+        } else {
+          throw error;
+        }
         return;
       }
 
-      const pollData = findMessage.poll_data as PollData;
-
-      // Check if expired
-      if (new Date(pollData.expires_at) < new Date()) {
-        toast.error("This poll has expired");
-        return;
-      }
-
-      // Check if already voted
-      if (pollData.user_votes?.includes(optionId)) {
-        toast.error("You already voted for this option");
-        return;
-      }
-
-      // For single-select, check if already voted
-      if (!pollData.is_multi_select && pollData.user_votes?.length > 0) {
-        toast.error("You can only vote once in this poll");
-        return;
-      }
-
-      // Update poll data
-      const updatedPollData = {
-        ...pollData,
-        total_votes: pollData.total_votes + 1,
-        options: pollData.options.map((opt) =>
-          opt.id === optionId
-            ? { ...opt, vote_count: opt.vote_count + 1 }
-            : opt,
-        ),
-        user_votes: [...(pollData.user_votes || []), optionId],
-      };
-
-      // Update message
-      const { error: updateError } = await supabase
-        .from("messages")
-        .update({ poll_data: updatedPollData })
-        .eq("id", messageId);
-
-      if (updateError) throw updateError;
-
-      // Update local state
+      // Update with the actual data from the database
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === messageId ? { ...msg, poll_data: updatedPollData } : msg,
+          msg.id === messageId && updatedPollData
+            ? { ...msg, poll_data: updatedPollData }
+            : msg,
         ),
       );
 
@@ -1871,6 +2014,8 @@ export function ChatroomMessagesEnhanced({
     } catch (error) {
       console.error("Error voting:", error);
       toast.error("Failed to record vote");
+      // Revert optimistic update
+      setMessages(originalMessages);
     }
   };
 

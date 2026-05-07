@@ -9,21 +9,17 @@ import { generateChatroomMetadata } from "@/lib/chatrooms/metadata";
 import { ChatroomShareButton } from "@/components/chatrooms/ChatroomShareButton";
 import { cache } from "react";
 
-// Add revalidation (1 hour)
-export const revalidate = 3600; // 1 hour in seconds
+export const revalidate = 3600;
 
-// Cached data fetching - will be deduplicated across generateMetadata and page
-const getChatroomData = cache(async (id: string) => {
+const getChatroomData = cache(async (id: string, userId?: string) => {
   const supabase = await createClient();
 
-  // Fetch chatroom and messages in parallel
   const [{ data: userData }, { data: chatroom, error: chatroomError }] =
     await Promise.all([
       supabase.auth.getUser(),
       supabase.from("chatrooms").select("*").eq("id", id).maybeSingle(),
     ]);
 
-  // Fetch messages with user profiles
   const { data: messages } = await supabase
     .from("messages")
     .select(
@@ -61,8 +57,8 @@ const getChatroomData = cache(async (id: string) => {
     `,
     )
     .eq("chatroom_id", id)
-    .order("created_at", { ascending: false }) // Get newest first
-    .limit(100); // Increase to 100
+    .order("created_at", { ascending: false })
+    .limit(100);
 
   if (!messages || messages.length === 0) {
     return {
@@ -121,28 +117,70 @@ const getChatroomData = cache(async (id: string) => {
     repliedMessages = repliedData || [];
   }
 
+  // === NEW: Fetch poll votes for current user ===
+  let userPollVotes: any[] = [];
+  const currentUserId = userData?.user?.id;
+
+  if (currentUserId) {
+    // Get messages that have polls
+    const pollMessageIds = messages
+      .filter((msg: any) => msg.poll_data)
+      .map((msg: any) => msg.id);
+
+    if (pollMessageIds.length > 0) {
+      const { data: votes } = await supabase
+        .from("poll_votes")
+        .select("message_id, option_id")
+        .in("message_id", pollMessageIds)
+        .eq("user_id", currentUserId);
+
+      userPollVotes = votes || [];
+    }
+  }
+
   // Create a map for quick reply lookup
   const repliedMessagesMap = new Map();
   repliedMessages.forEach((msg: any) => {
     repliedMessagesMap.set(msg.id, msg);
   });
 
-  // Hydrate messages with replies and ensure reactions_count is an object
-  const hydratedMessages = messages.map((msg: any) => ({
-    ...msg,
-    reply_to_message: msg.reply_to
-      ? repliedMessagesMap.get(msg.reply_to)
-      : null,
-    reactions_count: msg.reactions_count || {},
-    user_reactions: [], // Will be populated client-side
-    translated_content: {}, // Initialize empty
-  }));
+  // Create a map for user poll votes (message_id -> array of option_ids)
+  const pollVotesMap = new Map();
+  userPollVotes.forEach((vote: any) => {
+    if (!pollVotesMap.has(vote.message_id)) {
+      pollVotesMap.set(vote.message_id, []);
+    }
+    pollVotesMap.get(vote.message_id).push(vote.option_id);
+  });
+
+  // Hydrate messages with replies and poll votes
+  const hydratedMessages = messages.map((msg: any) => {
+    // Check if this message has a poll and user has voted on it
+    let pollDataWithUserVotes = msg.poll_data;
+    if (msg.poll_data && pollVotesMap.has(msg.id)) {
+      pollDataWithUserVotes = {
+        ...msg.poll_data,
+        user_votes: pollVotesMap.get(msg.id),
+      };
+    }
+
+    return {
+      ...msg,
+      poll_data: pollDataWithUserVotes,
+      reply_to_message: msg.reply_to
+        ? repliedMessagesMap.get(msg.reply_to)
+        : null,
+      reactions_count: msg.reactions_count || {},
+      user_reactions: [],
+      translated_content: {},
+    };
+  });
 
   return {
     userData,
     chatroom,
     chatroomError,
-    messages: hydratedMessages.reverse() as MessageRow[], // Reverse to show oldest first
+    messages: hydratedMessages.reverse() as MessageRow[],
     supabase,
   };
 });
@@ -153,8 +191,6 @@ export async function generateMetadata({
   params: Promise<{ id: string }>;
 }): Promise<Metadata> {
   const { id } = await params;
-
-  // This will be cached and reused by the page component
   const { chatroom, chatroomError } = await getChatroomData(id);
 
   if (!chatroom || chatroomError) {
@@ -170,12 +206,9 @@ export async function generateMetadata({
     visibility: chatroom.visibility,
   };
 
-  // Include country in description for PSA and NSA
   const getCountryDescription = () => {
     if (chatroom.country_code && ["psa", "nsa"].includes(chatroom.type)) {
-      return `${
-        chatroom.title
-      } - ${chatroom.country_code.toUpperCase()} Chatroom`;
+      return `${chatroom.title} - ${chatroom.country_code.toUpperCase()} Chatroom`;
     }
     return chatroom.title;
   };
@@ -197,7 +230,6 @@ export default async function ChatroomPage({
   const searchParamsObj = await searchParams;
   const messageId = searchParamsObj.messageId as string;
 
-  // This will reuse the cached data from generateMetadata
   const { userData, chatroom, chatroomError, messages, supabase } =
     await getChatroomData(id);
 
@@ -259,7 +291,6 @@ export default async function ChatroomPage({
             ) : null}
           </div>
 
-          {/* Add share button */}
           {chatroom.shareable && (
             <ChatroomShareButton
               chatroom={chatroom as ChatroomRecord}
@@ -275,7 +306,7 @@ export default async function ChatroomPage({
           allowFiles={chatroom.allow_files}
           shareable={chatroom.shareable}
           initialMessages={messages ?? []}
-          highlightedMessageId={messageId} // Pass the message ID to highlight
+          highlightedMessageId={messageId}
         />
       </section>
     </main>

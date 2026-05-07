@@ -207,18 +207,55 @@ CREATE INDEX IF NOT EXISTS idx_messages_audio_data ON public.messages USING gin 
 CREATE INDEX IF NOT EXISTS idx_messages_event_id ON public.messages(event_id) WHERE event_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_event_reminders_remind_at ON public.event_reminders(remind_at) WHERE status = 'pending';
 
--- Helper function to update poll votes (optional, for atomic updates)
-CREATE OR REPLACE FUNCTION update_poll_vote(message_id uuid, option_id text, user_id uuid)
-RETURNS void AS $$
+-- Improved atomic poll vote update function
+CREATE OR REPLACE FUNCTION update_poll_vote(
+  p_message_id uuid, 
+  p_option_id text, 
+  p_user_id uuid
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
 DECLARE
   current_poll jsonb;
   updated_poll jsonb;
-  options jsonb;
+  v_user_votes jsonb;
+  v_is_multi_select boolean;
 BEGIN
-  -- Get current poll data
-  SELECT poll_data INTO current_poll FROM public.messages WHERE id = message_id;
+  -- Get current poll data with a lock to prevent race conditions
+  SELECT poll_data INTO current_poll 
+  FROM public.messages 
+  WHERE id = p_message_id
+  FOR UPDATE;
   
-  -- Update the poll data
+  -- Check if poll exists
+  IF current_poll IS NULL THEN
+    RAISE EXCEPTION 'Poll not found for message %', p_message_id;
+  END IF;
+  
+  -- Check if poll is expired
+  IF (current_poll->>'expires_at')::timestamptz < NOW() THEN
+    RAISE EXCEPTION 'Poll has expired';
+  END IF;
+  
+  -- Get multi-select setting
+  v_is_multi_select := COALESCE((current_poll->>'is_multi_select')::boolean, false);
+  
+  -- Get current user votes
+  v_user_votes := COALESCE(current_poll->'user_votes', '[]'::jsonb);
+  
+  -- Check if user already voted for this option
+  IF v_user_votes @> to_jsonb(p_option_id) THEN
+    RAISE EXCEPTION 'User already voted for this option';
+  END IF;
+  
+  -- For single-select, check if user already voted for any option
+  IF NOT v_is_multi_select AND jsonb_array_length(v_user_votes) > 0 THEN
+    RAISE EXCEPTION 'User already voted in this single-select poll';
+  END IF;
+  
+  -- Update poll data atomically
   UPDATE public.messages 
   SET poll_data = jsonb_set(
     jsonb_set(
@@ -228,20 +265,61 @@ BEGIN
         ((current_poll->>'total_votes')::int + 1)::text::jsonb
       ),
       '{options}',
-        (SELECT jsonb_agg(
+      (
+        SELECT jsonb_agg(
           CASE 
-            WHEN opt->>'id' = option_id THEN
+            WHEN opt->>'id' = p_option_id THEN
               jsonb_set(opt, '{vote_count}', ((opt->>'vote_count')::int + 1)::text::jsonb)
             ELSE opt
           END
-        ) FROM jsonb_array_elements(current_poll->'options') AS opt)
+        ) 
+        FROM jsonb_array_elements(current_poll->'options') AS opt
+      )
     ),
     '{user_votes}',
-    (COALESCE(current_poll->'user_votes', '[]'::jsonb) || to_jsonb(option_id))
+    (v_user_votes || to_jsonb(p_option_id))
   )
-  WHERE id = message_id;
+  WHERE id = p_message_id
+  RETURNING poll_data INTO updated_poll;
+  
+  -- Also insert into poll_votes table for tracking
+  INSERT INTO public.poll_votes (message_id, user_id, option_id)
+  VALUES (p_message_id, p_user_id, p_option_id)
+  ON CONFLICT (message_id, user_id, option_id) DO NOTHING;
+  
+  RETURN updated_poll;
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+-- Grant execute permission
+GRANT EXECUTE ON FUNCTION update_poll_vote(uuid, text, uuid) TO authenticated;
+
+-- Create poll_votes table
+CREATE TABLE IF NOT EXISTS public.poll_votes (
+  id uuid primary key default gen_random_uuid(),
+  message_id uuid REFERENCES public.messages(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES public.users_profile(id) ON DELETE CASCADE,
+  option_id text NOT NULL,
+  created_at timestamptz default now(),
+  UNIQUE(message_id, user_id, option_id)
+);
+
+-- Create index for faster lookups
+CREATE INDEX idx_poll_votes_message_user ON public.poll_votes(message_id, user_id);
+
+-- Enable RLS
+ALTER TABLE public.poll_votes ENABLE ROW LEVEL SECURITY;
+
+-- Policies
+CREATE POLICY "Users can view their own votes"
+ON public.poll_votes FOR SELECT
+TO authenticated
+USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own votes"
+ON public.poll_votes FOR INSERT
+TO authenticated
+WITH CHECK (auth.uid() = user_id);
 
 -- Note: Changed p_country_code parameter from char(2) to text to handle NULL
 CREATE OR REPLACE FUNCTION get_or_create_chatroom(
