@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,7 +29,7 @@ interface PollCreatorProps {
   onCreate: (
     question: string,
     options: string[],
-    optionImages: File[],
+    optionImages: { file: File; index: number }[],
     isMultiSelect: boolean,
     durationDays: number,
   ) => Promise<void>;
@@ -48,6 +48,17 @@ export function PollCreator({
   const [durationDays, setDurationDays] = useState("7");
   const [isCreating, setIsCreating] = useState(false);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useEffect(() => {
+    // Cleanup function to revoke object URLs
+    return () => {
+      options.forEach((option) => {
+        if (option.image) {
+          URL.revokeObjectURL(URL.createObjectURL(option.image));
+        }
+      });
+    };
+  }, [options]);
 
   const addOption = () => {
     if (options.length < 10) {
@@ -83,15 +94,19 @@ export function PollCreator({
 
     setIsCreating(true);
     try {
+      // Create array of images with their indices
+      const imagesWithIndices = options
+        .map((opt, idx) => (opt.image ? { file: opt.image, index: idx } : null))
+        .filter((item): item is { file: File; index: number } => item !== null);
+
       await onCreate(
         question,
         options.map((opt) => opt.text),
-        options
-          .map((opt) => opt.image)
-          .filter((img): img is File => img !== null),
+        imagesWithIndices, // Pass images with indices
         isMultiSelect,
         parseInt(durationDays),
       );
+
       // Reset form
       setQuestion("");
       setOptions([{ text: "", image: null }]);
@@ -133,13 +148,14 @@ export function PollCreator({
             <Label>Options (2-10)</Label>
             <div className="space-y-2 mt-1">
               {options.map((option, idx) => (
-                <div key={idx} className="flex gap-2">
+                <div key={idx} className="flex gap-2 items-center">
                   <Input
                     placeholder={`Option ${idx + 1}`}
                     value={option.text}
                     onChange={(e) => updateOptionText(idx, e.target.value)}
                     className="flex-1"
                   />
+
                   <input
                     type="file"
                     accept="image/*"
@@ -151,6 +167,25 @@ export function PollCreator({
                       handleOptionImage(idx, e.target.files?.[0] || null)
                     }
                   />
+
+                  {/* Image Preview - Fixed typo and placement */}
+                  {option.image && (
+                    <div className="relative w-8 h-8 rounded overflow-hidden flex-shrink-0">
+                      <img
+                        src={URL.createObjectURL(option.image)}
+                        alt={`Preview for option ${idx + 1}`}
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        onClick={() => handleOptionImage(idx, null)}
+                        className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+                        type="button"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+
                   <Button
                     variant="outline"
                     size="icon"
@@ -163,6 +198,7 @@ export function PollCreator({
                   >
                     <ImageIcon className="h-4 w-4" />
                   </Button>
+
                   {idx > 1 && (
                     <Button
                       variant="ghost"
@@ -215,7 +251,7 @@ export function PollCreator({
                 onChange={(e) => setIsMultiSelect(e.target.checked)}
                 className="h-4 w-4 rounded border-gray-300"
               />
-              <Label htmlFor="multiSelect" className="text-sm font-normal">
+              <Label htmlFor="multiSelect" className="text-xs font-normal">
                 Allow multiple selections
               </Label>
             </div>

@@ -98,7 +98,7 @@ export function Poll({ pollData, onVote, isOwn }: PollProps) {
   };
 
   return (
-    <Card className="mt-3 p-4 bg-muted/30 border-2 transition-all hover:border-primary/30">
+    <Card className="mt-3 p-2 sm:p-4 bg-muted/30 border-2 transition-all hover:border-primary/30">
       {/* Header */}
       <div className="flex items-start justify-between mb-3 flex-wrap gap-2">
         <div>

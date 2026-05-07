@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { format, formatDistanceToNow } from "date-fns";
 import { useAuth } from "@/lib/context/AuthContext";
 import { cn, getInitials } from "@/lib/utils";
@@ -150,6 +151,7 @@ export function ChatroomMessagesEnhanced({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pickerButtonRef = useRef<HTMLButtonElement>(null);
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([]);
   const chatTitle = getChatroomTitle(chatroom.type);
   const router = useRouter();
@@ -196,6 +198,34 @@ export function ChatroomMessagesEnhanced({
     new Map(),
   );
   const { setupTracking, cleanup } = useMessageViewTracking();
+  const [pickerState, setPickerState] = useState<{
+    messageId: string;
+    position: { top: number; left: number };
+  } | null>(null);
+
+  // Function to show picker at button position
+  const showReactionPicker = (
+    messageId: string,
+    buttonElement: HTMLButtonElement,
+  ) => {
+    const rect = buttonElement.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const pickerHeight = 100;
+
+    // Calculate position
+    let top =
+      spaceAbove > pickerHeight
+        ? rect.top - pickerHeight - 8 // Show above
+        : rect.bottom + 8; // Show below
+
+    setPickerState({
+      messageId,
+      position: {
+        top,
+        left: rect.left + rect.width / 2,
+      },
+    });
+  };
 
   // Run tracking when messages change or when scrolling stops
   useEffect(() => {
@@ -1872,35 +1902,61 @@ export function ChatroomMessagesEnhanced({
   const createPoll = async (
     question: string,
     options: string[],
-    optionImages: File[],
+    optionImages: { file: File; index: number }[],
     isMultiSelect: boolean,
     durationDays: number,
   ) => {
     if (!profile) return;
 
-    try {
-      // Upload option images
-      const imageUrls = await Promise.all(
-        options.map(async (_, idx) => {
-          const img = optionImages[idx];
-          if (!img) return null;
+    // Validate IDs
+    if (!chatroom?.id || !profile?.id) {
+      toast.error("Missing chatroom or user information");
+      return;
+    }
 
-          const fileName = `poll-${Date.now()}-${idx}-${img.name}`;
-          const filePath = `polls/${chatroom.id}/${fileName}`;
+    try {
+      // Initialize image URLs array with nulls
+      const imageUrls: (string | null)[] = new Array(options.length).fill(null);
+
+      // Upload only images that exist - MATCH THE AUDIO PATTERN
+      if (optionImages.length > 0) {
+        const uploadPromises = optionImages.map(async ({ file, index }) => {
+          // Create a unique filename - same pattern as audio
+          const timestamp = Date.now();
+          const randomId = crypto.randomUUID();
+          const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+          const fileName = `poll_${timestamp}_${randomId}_${index}_${sanitizedFileName}`;
+
+          // DON'T use "polls/" folder - use same pattern as audio
+          const filePath = `${chatroom.id}/${profile.id}/${fileName}`;
 
           const { error: uploadError } = await supabase.storage
             .from("chat-attachments")
-            .upload(filePath, img);
+            .upload(filePath, file, {
+              cacheControl: "3600",
+              contentType: file.type,
+              upsert: false,
+            });
 
-          if (uploadError) throw uploadError;
+          if (uploadError) {
+            console.error(`Upload error for option ${index}:`, uploadError);
+            throw uploadError;
+          }
 
           const {
             data: { publicUrl },
           } = supabase.storage.from("chat-attachments").getPublicUrl(filePath);
 
-          return publicUrl;
-        }),
-      );
+          return { index, url: publicUrl };
+        });
+
+        const uploadedResults = await Promise.all(uploadPromises);
+
+        // Place URLs at their correct indices
+        uploadedResults.forEach(({ index, url }) => {
+          imageUrls[index] = url;
+        });
+      }
 
       // Generate option IDs
       const optionIds = options.map(() => crypto.randomUUID());
@@ -1916,7 +1972,7 @@ export function ChatroomMessagesEnhanced({
         options: options.map((text, idx) => ({
           id: optionIds[idx],
           text,
-          image_url: imageUrls[idx] || null,
+          image_url: imageUrls[idx],
           vote_count: 0,
         })),
         user_votes: [],
@@ -2578,108 +2634,127 @@ export function ChatroomMessagesEnhanced({
       </div>
     );
   };
-  // In your message render function, update the reactions section:
+
+  // Simplified renderReactions - only one source of truth
   const renderReactions = (message: MessageRow) => {
-    if (
-      !message.reactions_count ||
-      Object.keys(message.reactions_count).length === 0
-    ) {
-      return (
-        <div className="mt-2 relative">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 rounded-full"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowReactionsPicker(
-                showReactionsPicker === message.id ? null : message.id,
-              );
-            }}
-          >
-            <SmilePlus className="h-4 w-4" />
-          </Button>
-          {showReactionsPicker === message.id && renderReactionsPicker(message)}
-        </div>
-      );
-    }
+    const hasReactions =
+      message.reactions_count &&
+      Object.keys(message.reactions_count).length > 0;
 
     return (
       <div className="mt-2 flex items-center gap-1 relative">
-        <div className="flex items-center gap-1 flex-wrap">
-          {Object.entries(message.reactions_count).map(([emoji, count]) => (
-            <Button
-              key={emoji}
-              variant="outline"
-              size="sm"
-              className={cn(
-                "h-7 px-2 rounded-full text-xs gap-1",
-                message.user_reactions?.includes(emoji)
-                  ? "bg-primary/10 border-primary/30"
-                  : "bg-background",
-              )}
-              onClick={() => toggleReaction(message.id, emoji)}
-            >
-              <span>{emoji}</span>
-              <span>{count}</span>
-            </Button>
-          ))}
-        </div>
+        {/* Existing reaction buttons */}
+        {hasReactions && (
+          <div className="flex items-center gap-1 flex-wrap">
+            {Object.entries(message.reactions_count ?? {}).map(
+              ([emoji, count]) => (
+                <Button
+                  key={emoji}
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "h-7 px-2 rounded-full text-xs gap-1",
+                    message.user_reactions?.includes(emoji)
+                      ? "bg-primary/10 border-primary/30"
+                      : "bg-background",
+                  )}
+                  onClick={() => toggleReaction(message.id, emoji)}
+                >
+                  <span>{emoji}</span>
+                  <span>{count}</span>
+                </Button>
+              ),
+            )}
+          </div>
+        )}
+
+        {/* Add reaction button - always visible */}
         <Button
+          ref={pickerButtonRef}
           variant="ghost"
           size="icon"
           className="h-7 w-7 rounded-full"
           onClick={(e) => {
             e.stopPropagation();
-            setShowReactionsPicker(
-              showReactionsPicker === message.id ? null : message.id,
-            );
+            if (showReactionsPicker === message.id) {
+              setShowReactionsPicker(null);
+              setPickerState(null);
+            } else {
+              setShowReactionsPicker(message.id);
+              showReactionPicker(message.id, e.currentTarget);
+            }
           }}
         >
           <SmilePlus className="h-4 w-4" />
         </Button>
-        {showReactionsPicker === message.id && renderReactionsPicker(message)}
-      </div>
-    );
-  };
 
-  // Update the renderReactionsPicker function:
-  const renderReactionsPicker = (message: MessageRow) => {
-    if (showReactionsPicker !== message.id) return null;
-
-    return (
-      <div className="absolute bottom-full left-0 mb-2 p-2 bg-card border rounded-xl shadow-lg z-50">
-        <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
-          {COMMON_REACTIONS.map((emoji) => (
-            <Button
-              key={emoji}
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 hover:scale-110 transition-transform hover:bg-muted"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleReaction(message.id, emoji);
-                setShowReactionsPicker(null);
+        {/* Portal-based picker - renders at document body level */}
+        {pickerState &&
+          pickerState.messageId === message.id &&
+          createPortal(
+            <div
+              className="fixed z-[100] animate-in fade-in zoom-in-95 duration-100"
+              style={{
+                top: pickerState.position.top,
+                left: pickerState.position.left,
+                transform: "translateX(-50%)",
               }}
             >
-              <span className="text-lg">{emoji}</span>
-            </Button>
-          ))}
-          {/* Add an emoji picker button for more options */}
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-8 w-8 hover:scale-110 transition-transform"
-            onClick={(e) => {
-              e.stopPropagation();
-              // You could open a full emoji picker here
-              setShowReactionsPicker(null);
-            }}
-            title="More emojis"
-          >
-            <SmilePlus className="h-4 w-4" />
-          </Button>
-        </div>
+              <div className="p-2 bg-card border rounded-xl shadow-xl">
+                <div className="flex items-center gap-1 flex-wrap max-w-[200px]">
+                  {COMMON_REACTIONS.map((emoji) => (
+                    <Button
+                      key={emoji}
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:scale-110 transition-transform hover:bg-muted"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleReaction(message.id, emoji);
+                        setShowReactionsPicker(null);
+                        setPickerState(null);
+                      }}
+                    >
+                      <span className="text-lg">{emoji}</span>
+                    </Button>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 hover:scale-110 transition-transform"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowReactionsPicker(null);
+                      setPickerState(null);
+                    }}
+                    title="More emojis"
+                  >
+                    <SmilePlus className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {/* Arrow */}
+                <div
+                  className="absolute w-3 h-3 bg-card border transform rotate-45"
+                  style={{
+                    top:
+                      pickerState.position.top > pickerState.position.top + 100
+                        ? "auto"
+                        : "-6px",
+                    bottom:
+                      pickerState.position.top > pickerState.position.top + 100
+                        ? "-6px"
+                        : "auto",
+                    left: "50%",
+                    transform: "translateX(-50%) rotate(45deg)",
+                    borderTopColor: "transparent",
+                    borderLeftColor: "transparent",
+                  }}
+                />
+              </div>
+            </div>,
+            document.body,
+          )}
       </div>
     );
   };
@@ -3649,7 +3724,6 @@ export function ChatroomMessagesEnhanced({
                               {/* Reactions */}
                               <div className="flex items-center gap-2">
                                 {renderReactions(message)}
-                                {renderReactionsPicker(message)}
                                 {message.view_count > 0 && (
                                   <span className="mt-2 text-xs text-base text-muted-foreground flex items-center gap-1 ml-2">
                                     <Eye className="h-3 w-3" />
