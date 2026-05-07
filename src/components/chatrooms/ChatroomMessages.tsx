@@ -1878,20 +1878,41 @@ export function ChatroomMessagesEnhanced({
   const sendAudioMessage = async (audioBlob: Blob, duration: number) => {
     if (!profile) return;
 
+    // Validate IDs
+    if (!chatroom?.id || !profile?.id) {
+      toast.error("Missing chatroom or user information");
+      return;
+    }
+
     try {
       // Generate waveform
       const waveformData = await generateWaveform(audioBlob);
 
-      // Upload audio file
-      const fileName = `audio-${Date.now()}.webm`;
-      const filePath = `audio/${chatroom.id}/${profile.id}/${fileName}`;
+      // Create a unique filename with proper extension
+      const timestamp = Date.now();
+      const randomId = crypto.randomUUID();
+      const fileName = `audio_${timestamp}_${randomId}.webm`;
 
-      const { error: uploadError } = await supabase.storage
+      // Use a simpler path structure - avoid using IDs in folder names if they're causing issues
+      const filePath = `${chatroom.id}/${profile.id}/${fileName}`;
+
+      console.log("Uploading audio to:", filePath); // Debug log
+
+      // Upload audio file to the chat-attachments bucket
+      const { error: uploadError, data } = await supabase.storage
         .from("chat-attachments")
-        .upload(filePath, audioBlob);
+        .upload(filePath, audioBlob, {
+          cacheControl: "3600",
+          contentType: "audio/webm",
+          upsert: false,
+        });
 
-      if (uploadError) throw uploadError;
+      if (uploadError) {
+        console.error("Upload error details:", uploadError);
+        throw uploadError;
+      }
 
+      // Get public URL
       const {
         data: { publicUrl },
       } = supabase.storage.from("chat-attachments").getPublicUrl(filePath);
@@ -1916,9 +1937,9 @@ export function ChatroomMessagesEnhanced({
       if (insertError) throw insertError;
 
       toast.success("Voice message sent!");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error sending audio:", error);
-      toast.error("Failed to send voice message");
+      toast.error(error.message || "Failed to send voice message");
     }
   };
 
