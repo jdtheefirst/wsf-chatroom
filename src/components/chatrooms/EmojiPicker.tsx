@@ -2,7 +2,11 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import EmojiPicker, { Theme, EmojiStyle, EmojiClickData } from "emoji-picker-react";
+import EmojiPicker, {
+  Theme,
+  EmojiStyle,
+  EmojiClickData,
+} from "emoji-picker-react";
 import { Button } from "@/components/ui/button";
 import { Smile } from "lucide-react";
 import {
@@ -16,7 +20,10 @@ interface EmojiPickerProps {
   disabled?: boolean;
 }
 
-export function EmojiPickerComponent({ onEmojiSelect, disabled }: EmojiPickerProps) {
+export function EmojiPickerComponent({
+  onEmojiSelect,
+  disabled,
+}: EmojiPickerProps) {
   const [open, setOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -28,7 +35,10 @@ export function EmojiPickerComponent({ onEmojiSelect, disabled }: EmojiPickerPro
   // Close picker when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+      if (
+        popoverRef.current &&
+        !popoverRef.current.contains(event.target as Node)
+      ) {
         setOpen(false);
       }
     };
@@ -45,7 +55,7 @@ export function EmojiPickerComponent({ onEmojiSelect, disabled }: EmojiPickerPro
           variant="ghost"
           size="icon"
           disabled={disabled}
-          className="h-9 w-9"
+          className="absolute left-0 top-1 h-9 w-9"
         >
           <Smile className="h-5 w-5" />
         </Button>

@@ -237,7 +237,7 @@ export function AudioRecorder({ onSend, disabled }: AudioRecorderProps) {
       )}
 
       {isRecording && (
-        <div className="absolute -top-8 left-0 flex items-center gap-2 bg-red-500 text-white px-2 py-1 rounded-lg text-xs whitespace-nowrap">
+        <div className="absolute -top-8 right-0 flex items-center gap-2 bg-red-500 text-white px-2 py-1 rounded-lg text-xs whitespace-nowrap">
           <div className="w-2 h-2 rounded-full bg-white animate-pulse" />
           Recording... {formatTime(duration)}
         </div>

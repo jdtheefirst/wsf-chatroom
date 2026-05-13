@@ -62,6 +62,14 @@ import {
   Verified,
   BarChart3,
   Eye,
+  Mic,
+  Smile,
+  SmileIcon,
+  Plus,
+  UserPlus,
+  MapPin,
+  Video,
+  Phone,
 } from "lucide-react";
 import { deleteMessage, updateMessage } from "@/lib/chatrooms/messages";
 import { supportedLanguages, LanguageCode } from "@/lib/chatrooms/languages";
@@ -166,8 +174,8 @@ export function ChatroomMessagesEnhanced({
   const [showReactionsPicker, setShowReactionsPicker] = useState<string | null>(
     null,
   );
-
   const [showScrollButton, setShowScrollButton] = useState(true);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const bottomSentinelRef = useRef<HTMLDivElement>(null);
@@ -3879,73 +3887,192 @@ export function ChatroomMessagesEnhanced({
                 <div className="flex items-end gap-3">
                   <div className="flex-1">
                     <div className="relative">
-                      <Textarea
-                        ref={textareaRef}
-                        placeholder={
-                          replyingTo
-                            ? `Replying to ${replyingTo.user_profile?.full_name}...`
-                            : "Type message..."
-                        }
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={handleKeyPress}
-                        disabled={sending}
-                        className="min-h-[56px] max-h-[120px] resize-none rounded-xl border-2 pr-12 focus-visible:ring-0 focus-visible:border-primary"
-                      />
-                      <div className="absolute right-1 sm:right-3 bottom-3 flex items-center">
-                        {/* Poll Creator Button */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setShowPollCreator(true)}
-                          disabled={sending}
-                          className="h-8 w-8 rounded-lg"
-                          title="Create Poll"
-                        >
-                          <BarChart3 className="h-4 w-4" />
-                        </Button>
+                      {/* Replying indicator */}
+                      {replyingTo && (
+                        <div className="mb-2 pb-2 border-b flex items-center justify-between text-sm text-muted-foreground">
+                          <span>
+                            Replying to {replyingTo.user_profile?.full_name}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setReplyingTo(null)}
+                            className="h-6 w-6 p-0"
+                          >
+                            <X className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
 
-                        {/* Audio Recorder */}
-                        <AudioRecorder
-                          onSend={sendAudioMessage}
-                          disabled={sending}
-                        />
+                      {/* Main input container */}
+                      <div className="flex relative gap-2 items-end">
+                        {/* + Button with popup menu - NO DIALOG */}
+                        <div className="relative">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowActionsMenu(!showActionsMenu)}
+                            className="h-9 w-9 rounded-full shrink-0 hover:bg-muted"
+                            aria-label="More actions"
+                          >
+                            <Plus className="h-5 w-5" />
+                          </Button>
 
-                        {/* Event Picker Button */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => setShowEventPicker(true)}
-                          disabled={sending}
-                          className="h-8 w-8 rounded-lg"
-                          title="Share Event"
-                        >
-                          <Calendar className="h-4 w-4" />
-                        </Button>
-                        <EmojiPickerComponent
-                          onEmojiSelect={handleEmojiSelect}
-                          disabled={sending}
-                        />
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          onChange={handleFileSelect}
-                          className="hidden"
-                          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
-                        />
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={!allowFiles || sending}
-                          className="h-8 w-8 rounded-lg"
-                          title="Attach file"
-                        >
-                          <Paperclip className="h-4 w-4" />
-                        </Button>
+                          {/* Popup menu that appears above the + button */}
+                          {showActionsMenu && (
+                            <>
+                              {/* Backdrop to close menu */}
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={() => setShowActionsMenu(false)}
+                              />
+
+                              {/* Menu items */}
+                              <div className="absolute bottom-full left-0 mb-2 w-48 bg-popover rounded-lg shadow-lg border overflow-hidden z-50 animate-in fade-in zoom-in-95 duration-100">
+                                <div className="py-1">
+                                  {/* Attach File */}
+                                  <button
+                                    onClick={() => {
+                                      fileInputRef.current?.click();
+                                      setShowActionsMenu(false);
+                                    }}
+                                    disabled={!allowFiles}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors disabled:opacity-50"
+                                  >
+                                    <Paperclip className="h-4 w-4" />
+                                    Document
+                                  </button>
+
+                                  {/* Poll */}
+                                  <button
+                                    onClick={() => {
+                                      setShowPollCreator(true);
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <BarChart3 className="h-4 w-4" />
+                                    Poll
+                                  </button>
+
+                                  {/* Event */}
+                                  <button
+                                    onClick={() => {
+                                      setShowEventPicker(true);
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <Calendar className="h-4 w-4" />
+                                    Event
+                                  </button>
+
+                                  {/* Audio/Video Call */}
+                                  <button
+                                    onClick={() => {
+                                      // Handle audio call
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <Phone className="h-4 w-4" />
+                                    Audio Call
+                                  </button>
+
+                                  <button
+                                    onClick={() => {
+                                      // Handle video call
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <Video className="h-4 w-4" />
+                                    Video Call
+                                  </button>
+
+                                  <div className="h-px bg-border my-1" />
+
+                                  {/* Contact */}
+                                  <button
+                                    onClick={() => {
+                                      // Handle share contact
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <UserPlus className="h-4 w-4" />
+                                    Contact
+                                  </button>
+
+                                  {/* Location */}
+                                  <button
+                                    onClick={() => {
+                                      // Handle location
+                                      setShowActionsMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2.5 text-sm flex items-center gap-3 hover:bg-muted transition-colors"
+                                  >
+                                    <MapPin className="h-4 w-4" />
+                                    Location
+                                  </button>
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Text input */}
+                        <div className="relative flex-1">
+                          <EmojiPickerComponent
+                            onEmojiSelect={handleEmojiSelect}
+                            disabled={sending}
+                          />
+
+                          <Textarea
+                            ref={textareaRef}
+                            placeholder={
+                              replyingTo
+                                ? `Replying to ${replyingTo.user_profile?.full_name}...`
+                                : "Type a message..."
+                            }
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyPress}
+                            disabled={sending}
+                            className="min-h-[40px] max-h-[120px] resize-none rounded-2xl border-0 bg-muted px-4 py-2.5 pl-8 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
+                            rows={1}
+                          />
+                        </div>
+                        {/* Right button - Toggles between mic and send based on input */}
+                        <div className="absolute right-1.5 bottom-1.5">
+                          {!input.trim() && !file ? (
+                            /* Voice Recording Button (when no text) */
+                            <AudioRecorder
+                              onSend={sendAudioMessage}
+                              disabled={sending}
+                            />
+                          ) : (
+                            /* Send Button (when text exists) */
+                            <Button
+                              type="button"
+                              size="icon"
+                              onClick={sendMessage}
+                              disabled={(!input.trim() && !file) || sending}
+                              className="h-7 w-7 rounded-full bg-primary hover:bg-primary/90 shrink-0"
+                            >
+                              {sending ? (
+                                <Loader2 className="h-3.5 w-3.5 text-primary-foreground animate-spin" />
+                              ) : (
+                                <Send className="h-3.5 w-3.5 text-primary-foreground" />
+                              )}
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </div>
 
+                    {/* Bottom status bar */}
                     <div className="flex items-center justify-between mt-3">
                       <div className="flex items-center gap-4 text-sm text-muted-foreground">
                         <span className="flex items-center gap-2">
@@ -3959,24 +4086,20 @@ export function ChatroomMessagesEnhanced({
                           </span>
                         )}
                       </div>
-
-                      <Button
-                        onClick={sendMessage}
-                        disabled={(!input.trim() && !file) || sending}
-                        className="rounded-full shadow-sm hover:shadow transition-all duration-200"
-                        size="icon"
-                      >
-                        {sending ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Send className="h-4 w-4" />
-                        )}
-                      </Button>
                     </div>
                   </div>
                 </div>
-              </div>
-              <div>
+
+                {/* Hidden file input */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                  accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt"
+                  multiple
+                />
+
                 {/* Poll Creator Dialog */}
                 <PollCreator
                   open={showPollCreator}
@@ -4005,7 +4128,11 @@ export function ChatroomMessagesEnhanced({
                     />
                   </DialogContent>
                 </Dialog>
+
+                {/* Audio Recorder - now fully integrated as the mic button */}
+                {/* The AudioRecorder component should render as just a button that opens recording UI */}
               </div>
+              <div></div>
             </div>
           </TabsContent>
 
