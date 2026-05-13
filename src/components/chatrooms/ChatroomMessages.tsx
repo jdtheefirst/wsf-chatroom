@@ -3905,7 +3905,7 @@ export function ChatroomMessagesEnhanced({
                       )}
 
                       {/* Main input container */}
-                      <div className="flex relative gap-2 items-end">
+                      <div className="flex relative gap-1 sm:gap-2 items-end">
                         {/* + Button with popup menu - NO DIALOG */}
                         <div className="relative">
                           <Button
@@ -4040,12 +4040,13 @@ export function ChatroomMessagesEnhanced({
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleKeyPress}
                             disabled={sending}
-                            className="min-h-[40px] max-h-[120px] resize-none rounded-2xl border-0 bg-muted px-4 py-2.5 pl-8 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0"
+                            className="text-sm min-h-[40px] max-h-[120px] resize-none rounded-2xl border-0 bg-muted px-4 py-2.5 pl-8 focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0 hide-scrollbar"
                             rows={1}
                           />
                         </div>
+
                         {/* Right button - Toggles between mic and send based on input */}
-                        <div className="absolute right-1.5 bottom-1.5">
+                        <div className="absolute right-0.5 bottom-1.5">
                           {!input.trim() && !file ? (
                             /* Voice Recording Button (when no text) */
                             <AudioRecorder
